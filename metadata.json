@@ -1,5 +1,5 @@
 {
-  "name": "Web TeraTerm",
+  "name": "Web OplixTerminal",
   "description": "A browser-based terminal emulator with SSH, Web Serial support, and macros.",
   "requestFramePermissions": [
     "camera",

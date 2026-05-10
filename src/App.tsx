@@ -5,7 +5,6 @@ export default function App() {
   const [activeConfig, setActiveConfig] = useState<ConnectConfig | null>(null);
   
   // Connection Form State
-  const [connType, setConnType] = useState<'ssh' | 'serial'>('ssh');
   const [sshHost, setSshHost] = useState('');
   const [sshUser, setSshUser] = useState('');
   const [sshPass, setSshPass] = useState('');
@@ -15,8 +14,12 @@ export default function App() {
   
   const [serialBaud, setSerialBaud] = useState('115200');
 
-  // Additional Setup State
-  const [setupTab, setSetupTab] = useState<'connection'|'additional'>('connection');
+  // Setup Steps
+  const [setupStep, setSetupStep] = useState<'new_conn'|'security_warning'|'ssh_auth'|'additional'|'ssh_forwarding'|null>('new_conn');
+  const [connType, setConnType] = useState<'tcpip' | 'serial'>('tcpip');
+  const [tcpService, setTcpService] = useState<'telnet'|'ssh'|'other'>('ssh');
+  
+  // Connection Form State
   const [autoLog, setAutoLog] = useState(false);
   const [delayChar, setDelayChar] = useState(0);
   const [delayLine, setDelayLine] = useState(0);
@@ -39,9 +42,9 @@ export default function App() {
       terminal: 'Terminal...', font: 'Font...', keyboard: 'Keyboard...', serialPort: 'Serial port...', proxy: 'Proxy...',
       ssh: 'SSH...', sshAuth: 'SSH Authentication...', sshFwd: 'SSH Forwarding...', sshKeygen: 'SSH Keygenerator...', tcpip: 'TCP/IP...', general: 'General...', addSettings: 'Additional settings...',
       saveSetup: 'Save setup...', restoreSetup: 'Restore setup...', setupDir: 'Setup directory...', loadKeyMap: 'Load key map...',
-      macro: 'Macro', noWindows: 'No windows...', about: 'About Web TeraTerm...',
+      macro: 'Macro', noWindows: 'No windows...', about: 'About Web OplixTerminal...',
       pDelay: 'Paste Delay', charDelay: 'Char Delay (ms):', lineDelay: 'Line Delay (ms):', encoding: 'Character Encoding',
-      connSetup: 'TeraTerm Setup', connection: 'Connection'
+      connSetup: 'OplixTerminal Setup', connection: 'Connection'
     },
     ja: {
       file: 'ファイル', edit: '編集', setup: '設定', control: 'コントロール', window: 'ウィンドウ', help: 'ヘルプ',
@@ -53,9 +56,9 @@ export default function App() {
       terminal: '端末...', font: 'フォント...', keyboard: 'キーボード...', serialPort: 'シリアルポート...', proxy: 'プロキシ...',
       ssh: 'SSH...', sshAuth: 'SSH 認証...', sshFwd: 'SSH 転送...', sshKeygen: 'SSH 鍵生成...', tcpip: 'TCP/IP...', general: '全般...', addSettings: '追加設定...',
       saveSetup: '設定を保存...', restoreSetup: '設定を復元...', setupDir: '設定ディレクトリ...', loadKeyMap: 'キーマップ読み込み...',
-      macro: 'マクロ', noWindows: 'ウィンドウなし...', about: 'Web TeraTerm について...',
+      macro: 'マクロ', noWindows: 'ウィンドウなし...', about: 'Web OplixTerminal について...',
       pDelay: 'ペースト遅延', charDelay: '文字遅延 (ms):', lineDelay: '行遅延 (ms):', encoding: '文字エンコーディング',
-      connSetup: 'TeraTerm 設定', connection: '接続'
+      connSetup: 'OplixTerminal 設定', connection: '接続'
     }
   };
   const t = translations[lang];
@@ -91,7 +94,6 @@ export default function App() {
   const [showMacroEditor, setShowMacroEditor] = useState(false);
   
   // App State
-  const [showSetup, setShowSetup] = useState(true);
   const [pendingMacro, setPendingMacro] = useState<string | null>(null);
   const [timeStr, setTimeStr] = useState('');
   const [quickCmd, setQuickCmd] = useState('');
@@ -135,7 +137,7 @@ export default function App() {
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `teraterm_log_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
+    a.download = `oplixterminal_log_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -144,13 +146,15 @@ export default function App() {
     e.preventDefault();
     if (autoLog || isLogging) sessionLogRef.current = '';
     if (autoLog && !isLogging) setIsLogging(true);
-    if (connType === 'ssh') {
+    if (connType === 'tcpip' && tcpService === 'ssh') {
       if (!sshHost || !sshUser) return;
       setActiveConfig({ type: 'ssh', host: sshHost, username: sshUser, password: authMethod === 'password' ? sshPass : undefined, privateKey: authMethod === 'key' ? sshKey : undefined, port: sshPort, forwardRules, encoding });
-    } else {
+    } else if (connType === 'serial') {
       setActiveConfig({ type: 'serial', baudRate: parseInt(serialBaud, 10), encoding });
+    } else if (connType === 'tcpip' && tcpService === 'telnet') {
+      setActiveConfig({ type: 'ssh', host: sshHost, username: 'anonymous', port: sshPort, encoding });
     }
-    setShowSetup(false);
+    setSetupStep(null);
   };
 
   const handleAddMacro = (e: React.FormEvent) => {
@@ -181,7 +185,7 @@ export default function App() {
           <div className="w-4 h-4 bg-[#4a9eff] rounded-sm flex items-center justify-center">
             <span className="text-[10px] font-bold text-white">T</span>
           </div>
-          <span className="text-xs font-medium">Web TeraTerm {activeConfig ? `- [${activeConfig.type === 'ssh' ? `${activeConfig.host}:${activeConfig.port || 22}` : `COM (${activeConfig.baudRate})`} - ${activeConfig.type === 'ssh' ? 'SSH2' : 'SERIAL'}]` : '- [Disconnected]'}</span>
+          <span className="text-xs font-medium">Web OplixTerminal {activeConfig ? `- [${activeConfig.type === 'ssh' ? `${activeConfig.host}:${activeConfig.port || 22}` : `COM (${activeConfig.baudRate})`} - ${activeConfig.type === 'ssh' ? 'SSH2' : 'SERIAL'}]` : '- [Disconnected]'}</span>
         </div>
         <div className="flex gap-4">
           {activeConfig ? (
@@ -197,8 +201,8 @@ export default function App() {
           )}
           <div className="flex gap-2">
             <div className="w-3 h-3 rounded-full bg-[#444] hover:bg-[#555] cursor-pointer"></div>
-            <div className="w-3 h-3 rounded-full bg-[#444] hover:bg-[#555] cursor-pointer" onClick={() => setShowSetup(true)}></div>
-            <div className="w-3 h-3 rounded-full bg-[#ff5f57] cursor-pointer" onClick={() => {setActiveConfig(null); setShowSetup(true);}}></div>
+            <div className="w-3 h-3 rounded-full bg-[#444] hover:bg-[#555] cursor-pointer" onClick={() => setSetupStep('new_conn')}></div>
+            <div className="w-3 h-3 rounded-full bg-[#ff5f57] cursor-pointer" onClick={() => {setActiveConfig(null); setSetupStep('new_conn');}}></div>
           </div>
         </div>
       </div>
@@ -209,7 +213,7 @@ export default function App() {
            <div className={`px-2 py-1 cursor-pointer ${activeMenu === 'file' ? 'bg-[#444] text-white' : 'hover:bg-[#444]'}`} onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu === 'file' ? null : 'file'); }}>{t.file}</div>
            {activeMenu === 'file' && (
              <div className="absolute top-full left-0 bg-[#252526] border border-[#3d3d3d] shadow-lg py-1 min-w-[220px] text-[#ccc]" onClick={e => e.stopPropagation()}>
-                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setShowSetup(true); setActiveMenu(null); }}>{t.newConn}</div>
+                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setSetupStep('new_conn'); setActiveMenu(null); }}>{t.newConn}</div>
                 <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { window.open(window.location.href, '_blank'); setActiveMenu(null); }}>{t.dupSession}</div>
                 <div className="h-px bg-[#3d3d3d] my-1.5"></div>
                 <div className={`px-5 py-1.5 flex justify-between cursor-pointer ${isLogging ? 'text-gray-500' : 'hover:bg-[#4a9eff] hover:text-white'}`} onClick={() => { if(!isLogging){ setIsLogging(true); setLogPaused(false); alert("Logging started (stored in memory until stopped)."); } setActiveMenu(null); }}><span>{t.log}</span></div>
@@ -227,7 +231,7 @@ export default function App() {
                 <div className="h-px bg-[#3d3d3d] my-1.5"></div>
                 <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { window.print(); setActiveMenu(null); }}>{t.print}</div>
                 <div className="h-px bg-[#3d3d3d] my-1.5"></div>
-                <div className={`px-5 py-1.5 cursor-pointer ${activeConfig ? 'hover:bg-[#4a9eff] hover:text-white' : 'text-gray-500 cursor-not-allowed'}`} onClick={() => { if(activeConfig) { setActiveConfig(null); setShowSetup(true); } setActiveMenu(null); }}>{t.disconnect}</div>
+                <div className={`px-5 py-1.5 cursor-pointer ${activeConfig ? 'hover:bg-[#4a9eff] hover:text-white' : 'text-gray-500 cursor-not-allowed'}`} onClick={() => { if(activeConfig) { setActiveConfig(null); setSetupStep('new_conn'); } setActiveMenu(null); }}>{t.disconnect}</div>
                 <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { window.location.reload(); setActiveMenu(null); }}>{t.exit}</div>
                 <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { window.close(); window.location.reload(); setActiveMenu(null); }}>{t.exitAll}</div>
              </div>
@@ -248,21 +252,21 @@ export default function App() {
         <div className="relative group" onMouseEnter={() => activeMenu && setActiveMenu('setup')}>
            <div className={`px-2 py-1 cursor-pointer ${activeMenu === 'setup' ? 'bg-[#444] text-white' : 'hover:bg-[#444]'}`} onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu === 'setup' ? null : 'setup'); }}>{t.setup}</div>
            {activeMenu === 'setup' && (
-             <div className="absolute top-full left-0 bg-[#252526] border border-[#3d3d3d] shadow-lg py-1 min-w-[220px] text-[#ccc]" onClick={e => e.stopPropagation()}>
-                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setSetupTab('additional'); setShowSetup(true); setActiveMenu(null); }}>{t.terminal}</div>
+             <div className="absolute top-full left-0 bg-[#252526] border border-[#3d3d3d] shadow-lg py-1 min-w-[170px] text-[#ccc]" onClick={e => e.stopPropagation()}>
+                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setSetupStep('additional'); setActiveMenu(null); }}>{t.terminal}</div>
                 <div className="px-5 py-1.5 text-gray-500 cursor-not-allowed">Window...</div>
                 <div className="px-5 py-1.5 text-gray-500 cursor-not-allowed">{t.font}</div>
                 <div className="px-5 py-1.5 text-gray-500 cursor-not-allowed">{t.keyboard}</div>
-                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setConnType('serial'); setSetupTab('connection'); setShowSetup(true); setActiveMenu(null); }}>{t.serialPort}</div>
+                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setConnType('serial'); setSetupStep('new_conn'); setActiveMenu(null); }}>{t.serialPort}</div>
                 <div className="px-5 py-1.5 text-gray-500 cursor-not-allowed">{t.proxy}</div>
                 <div className="h-px bg-[#3d3d3d] my-1.5"></div>
-                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setConnType('ssh'); setSetupTab('connection'); setShowSetup(true); setActiveMenu(null); }}>{t.ssh}</div>
-                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setConnType('ssh'); setSetupTab('connection'); setShowSetup(true); setActiveMenu(null); }}>{t.sshAuth}</div>
-                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setShowSSHForwarding(true); setShowSetup(true); setActiveMenu(null); }}>{t.sshFwd}</div>
+                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setConnType('tcpip'); setSetupStep('new_conn'); setActiveMenu(null); }}>{t.ssh}</div>
+                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setConnType('tcpip'); setSetupStep('ssh_auth'); setActiveMenu(null); }}>{t.sshAuth}</div>
+                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setSetupStep('ssh_forwarding'); setActiveMenu(null); }}>{t.sshFwd}</div>
                 <div className="px-5 py-1.5 text-gray-500 cursor-not-allowed">{t.sshKeygen}</div>
                 <div className="px-5 py-1.5 text-gray-500 cursor-not-allowed">{t.tcpip}</div>
                 <div className="px-5 py-1.5 text-gray-500 cursor-not-allowed">{t.general}</div>
-                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setSetupTab('additional'); setShowSetup(true); setActiveMenu(null); }}>{t.addSettings}</div>
+                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setSetupStep('additional'); setActiveMenu(null); }}>{t.addSettings}</div>
                 <div className="h-px bg-[#3d3d3d] my-1.5"></div>
                 <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { alert('Settings are automatically saved continuously to browser localStorage.'); setActiveMenu(null); }}>{t.saveSetup}</div>
                 <div className="px-5 py-1.5 text-gray-500 cursor-not-allowed">{t.restoreSetup}</div>
@@ -294,7 +298,7 @@ export default function App() {
            <div className={`px-2 py-1 cursor-pointer ${activeMenu === 'help' ? 'bg-[#444] text-white' : 'hover:bg-[#444]'}`} onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu === 'help' ? null : 'help'); }}>{t.help}</div>
            {activeMenu === 'help' && (
              <div className="absolute top-full left-0 bg-[#252526] border border-[#3d3d3d] shadow-lg py-1 min-w-[170px] text-[#ccc]" onClick={e => e.stopPropagation()}>
-                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { alert('Web TeraTerm Replica\nCreated for AI Studio\nIncludes SFTP Drop Upload and Session Logging.'); setActiveMenu(null); }}>{t.about}</div>
+                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { alert('Web OplixTerminal\nCreated for AI Studio\nIncludes SFTP Drop Upload and Session Logging.'); setActiveMenu(null); }}>{t.about}</div>
              </div>
            )}
         </div>
@@ -310,7 +314,7 @@ export default function App() {
 
       {/* Toolbar */}
       <div className="flex items-center gap-1 p-1 bg-[#2d2d2d] border-b border-[#3d3d3d] shrink-0">
-        <button onClick={() => setShowSetup(true)} className="px-2 py-1 hover:bg-[#444] rounded text-[10px] flex flex-col items-center gap-0.5">
+        <button onClick={() => setSetupStep('new_conn')} className="px-2 py-1 hover:bg-[#444] rounded text-[10px] flex flex-col items-center gap-0.5">
           <span className="block text-xs leading-none">⚡</span>
           <span>Connect</span>
         </button>
@@ -400,177 +404,236 @@ export default function App() {
 
         {/* Terminal Pane / Setup Dialog */}
         <div className="flex-1 flex flex-col bg-[#0c0c0c] relative">
-          {showSetup ? (
-            <div className="absolute inset-0 bg-[#1e1e1e] flex items-center justify-center p-8 z-10">
-              {showSSHForwarding ? (
+          {setupStep !== null ? (
+            <div className="absolute inset-0 bg-[#1e1e1e] flex items-center justify-center p-8 z-10 text-[#ccc]">
+              {/* Common Dialog Header */}
+              {setupStep === 'new_conn' && (
+                <form className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch" onSubmit={(e) => { e.preventDefault(); if(connType==='tcpip' && tcpService==='ssh') setSetupStep('security_warning'); else { handleConnect(e); } }}>
+                  <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
+                    <span>New connection</span>
+                    <button type="button" onClick={() => setSetupStep(null)} className="text-[#888] hover:text-white text-sm leading-none">✕</button>
+                  </div>
+                  <div className="p-6 flex flex-col gap-6">
+                    {/* TCP/IP Section */}
+                    <div className="flex items-start gap-4">
+                       <input type="radio" id="tcpip" checked={connType === 'tcpip'} onChange={() => setConnType('tcpip')} className="mt-1 accent-[#4a9eff]" />
+                       <div className="flex flex-col gap-4 flex-1">
+                          <label htmlFor="tcpip" className="font-bold text-xs mt-0.5 cursor-pointer">TCP/IP</label>
+                          <div className="ml-2 flex items-center gap-4">
+                             <span className="w-16 text-right text-xs text-[#888]">Host:</span>
+                             <div className="relative flex-1">
+                               <input type="text" list="historyHosts" value={sshHost} onChange={e => setSshHost(e.target.value)} className="w-full bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" required={connType==='tcpip'} disabled={connType!=='tcpip'} />
+                               <datalist id="historyHosts">
+                                  <option value="192.168.1.1" />
+                                  <option value="localhost" />
+                               </datalist>
+                             </div>
+                          </div>
+                          
+                          <div className="ml-2 flex items-center gap-4">
+                             <span className="w-16 text-right text-xs text-[#888]">Service:</span>
+                             <div className="flex gap-4">
+                                <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={tcpService === 'telnet'} onChange={()=>setTcpService('telnet')} disabled={connType!=='tcpip'} className="accent-[#4a9eff]" /> Telnet</label>
+                                <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={tcpService === 'ssh'} onChange={()=>setTcpService('ssh')} disabled={connType!=='tcpip'} className="accent-[#4a9eff]" /> SSH</label>
+                                <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={tcpService === 'other'} onChange={()=>setTcpService('other')} disabled={connType!=='tcpip'} className="accent-[#4a9eff]" /> Other</label>
+                             </div>
+                          </div>
+                          
+                          <div className="ml-2 flex items-center gap-4">
+                             <span className="w-16 text-right text-xs text-[#888]">TCP port#:</span>
+                             <input type="number" value={sshPort} onChange={e => setSshPort(e.target.value)} className="w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" disabled={connType!=='tcpip'} />
+                             
+                             {tcpService === 'ssh' && (
+                                <div className="ml-4 flex items-center gap-3">
+                                   <span className="text-right text-xs text-[#888]">SSH version:</span>
+                                   <select className="w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff] disabled:opacity-50" disabled={true}><option>SSH2</option></select>
+                                </div>
+                             )}
+                          </div>
+                       </div>
+                    </div>
+                    
+                    {/* Serial Section */}
+                    <div className="flex items-start gap-4 pt-6 border-t border-[#3d3d3d]">
+                       <input type="radio" id="serial" checked={connType === 'serial'} onChange={() => setConnType('serial')} className="mt-1 accent-[#4a9eff]" />
+                       <div className="flex flex-col gap-4 flex-1">
+                          <label htmlFor="serial" className="font-bold text-xs mt-0.5 cursor-pointer">Serial</label>
+                          <div className="ml-2 flex items-center gap-4">
+                             <span className="w-16 text-right text-xs text-[#888]">Port:</span>
+                             <select className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff] disabled:opacity-50" disabled={connType!=='serial'}>
+                               <option>COM1: USB Serial Port</option>
+                               <option>COM2: Bluetooth</option>
+                             </select>
+                          </div>
+                          {connType === 'serial' && (
+                             <div className="ml-2 flex items-center gap-4">
+                                <span className="w-16 text-right text-xs text-[#888]">Baud Rate:</span>
+                                <select value={serialBaud} onChange={e => setSerialBaud(e.target.value)} className="w-32 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]">
+                                  <option value="9600">9600</option>
+                                  <option value="115200">115200</option>
+                                </select>
+                             </div>
+                          )}
+                       </div>
+                    </div>
+                  </div>
+                  
+                  <div className="p-4 border-t border-[#3d3d3d] bg-[#2d2d2d] flex justify-end gap-3 rounded-b">
+                     <button type="button" onClick={() => setSetupStep(null)} className="px-4 py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors">Cancel</button>
+                     <button type="submit" className="px-6 py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors">OK</button>
+                  </div>
+                </form>
+              )}
+              
+              {setupStep === 'security_warning' && (
+                <div className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch">
+                  <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
+                    <span className="text-[#ff9800]">SECURITY WARNING</span>
+                    <button type="button" onClick={() => setSetupStep('new_conn')} className="text-[#888] hover:text-white text-sm leading-none">✕</button>
+                  </div>
+                  <div className="p-6 pb-4 text-xs">
+                     <div className="flex items-center gap-3 text-[#ff9800] font-bold mb-4">
+                        <span className="text-xl">⚠️</span>
+                        <span>WARNING: SECURITY OF THIS HOST IS NOT GIVEN</span>
+                     </div>
+                     <p className="leading-relaxed text-[#ccc]">
+                       Connecting to this host is not recommended unless you are absolutely sure of its identity. Are you sure you want to proceed and connect?
+                     </p>
+                  </div>
+                  <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex justify-end gap-3 rounded-b">
+                     <button type="button" onClick={() => setSetupStep('new_conn')} className="px-4 py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors">Cancel</button>
+                     <button type="button" onClick={() => setSetupStep('ssh_auth')} className="px-6 py-1.5 text-xs bg-[#ff9800] hover:bg-[#f57c00] text-white rounded font-medium transition-colors">Continue</button>
+                  </div>
+                </div>
+              )}
+
+              {setupStep === 'ssh_auth' && (
+                <form className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch" onSubmit={(e) => { e.preventDefault(); handleConnect(e); }}>
+                  <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
+                    <span>SSH Authentication</span>
+                    <button type="button" onClick={() => setSetupStep('new_conn')} className="text-[#888] hover:text-white text-sm leading-none">✕</button>
+                  </div>
+                  <div className="p-6 flex flex-col gap-4">
+                     <div className="text-xs mb-2 font-bold text-[#4a9eff]">
+                        Authentication required.
+                     </div>
+                     <div className="flex gap-4 items-center">
+                        <span className="w-24 text-right text-xs text-[#888]">User name:</span>
+                        <input type="text" value={sshUser} onChange={e=>setSshUser(e.target.value)} className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" required />
+                     </div>
+                     <div className="flex gap-4 items-center">
+                        <span className="w-24 text-right text-xs text-[#888]">Passphrase:</span>
+                        <input type="password" value={sshPass} onChange={e=>setSshPass(e.target.value)} className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" />
+                     </div>
+                     
+                     <div className="flex gap-4 items-start mt-2">
+                        <span className="w-24 text-right text-xs text-[#888]">Methods:</span>
+                        <div className="flex-1 space-y-3">
+                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={authMethod==='password'} onChange={()=>setAuthMethod('password')} className="accent-[#4a9eff]" /> Plain password in memory</label>
+                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={authMethod==='key'} onChange={()=>setAuthMethod('key')} className="accent-[#4a9eff]" /> RSA/DSA/ECDSA/ED25519 key</label>
+                            {authMethod === 'key' && (
+                               <textarea value={sshKey} onChange={e=>setSshKey(e.target.value)} placeholder="-----BEGIN PRIVATE KEY-----" className="mt-2 w-full h-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-2 text-[10px] font-mono resize-none focus:outline-none focus:border-[#4a9eff]" required />
+                            )}
+                        </div>
+                     </div>
+                  </div>
+                  <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex justify-end gap-3 rounded-b">
+                     <button type="button" onClick={() => setSetupStep('new_conn')} className="px-4 py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors">Cancel</button>
+                     <button type="submit" className="px-6 py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors">OK</button>
+                  </div>
+                </form>
+              )}
+
+              {setupStep === 'additional' && (
+                <div className="w-full max-w-sm bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch">
+                  <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
+                    <span>Additional settings</span>
+                    <button type="button" onClick={() => setSetupStep(null)} className="text-[#888] hover:text-white text-sm leading-none">✕</button>
+                  </div>
+                  <div className="p-6 flex flex-col gap-6 text-xs">
+                     <div className="space-y-2">
+                        <span className="text-[#4a9eff] font-bold border-b border-[#3d3d3d] pb-1 block">Logging</span>
+                        <label className="flex items-center gap-2 mt-3 cursor-pointer">
+                           <input type="checkbox" checked={autoLog} onChange={e=>setAutoLog(e.target.checked)} className="accent-[#4a9eff]" /> 
+                           Auto log (download on disconnect)
+                        </label>
+                     </div>
+                     
+                     <div className="space-y-4 pt-2">
+                        <span className="text-[#4a9eff] font-bold border-b border-[#3d3d3d] pb-1 block">Transmit setup</span>
+                        <div className="flex gap-4 items-center">
+                           <label className="text-[#888] w-24">Delay / Char</label>
+                           <div className="flex items-center gap-2">
+                             <input type="number" value={delayChar} onChange={e=>setDelayChar(parseInt(e.target.value)||0)} className="w-20 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-2 py-1 focus:outline-none focus:border-[#4a9eff]" /> ms
+                           </div>
+                        </div>
+                        <div className="flex gap-4 items-center">
+                           <label className="text-[#888] w-24">Delay / Line</label>
+                           <div className="flex items-center gap-2">
+                             <input type="number" value={delayLine} onChange={e=>setDelayLine(parseInt(e.target.value)||0)} className="w-20 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-2 py-1 focus:outline-none focus:border-[#4a9eff]" /> ms
+                           </div>
+                        </div>
+                     </div>
+                     
+                     <div className="space-y-3 pt-2">
+                        <span className="text-[#4a9eff] font-bold border-b border-[#3d3d3d] pb-1 block">Terminal</span>
+                        <div className="flex gap-4 items-center mt-3">
+                           <span className="text-[#888] w-24">Encoding:</span>
+                           <select value={encoding} onChange={e=>setEncoding(e.target.value)} className="w-32 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-2 py-1 focus:outline-none focus:border-[#4a9eff]">
+                              <option value="utf-8">UTF-8</option>
+                              <option value="shift-jis">Shift-JIS</option>
+                              <option value="euc-jp">EUC-JP</option>
+                           </select>
+                        </div>
+                     </div>
+                  </div>
+                  <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex justify-end gap-3 rounded-b">
+                     <button type="button" onClick={() => setSetupStep(null)} className="px-6 py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors">OK</button>
+                  </div>
+                </div>
+              )}
+
+              {setupStep === 'ssh_forwarding' && (
                 <div className="w-full max-w-lg bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch">
                   <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
                     <span>SSH Port Forwarding Setup</span>
-                    <button type="button" onClick={() => setShowSSHForwarding(false)} className="text-[#888] hover:text-white text-sm leading-none">×</button>
+                    <button type="button" onClick={() => setSetupStep(null)} className="text-[#888] hover:text-white text-sm leading-none">✕</button>
                   </div>
-                  <div className="p-4 space-y-4">
-                    <div className="flex gap-4">
-                       <label className="flex items-center gap-1 text-xs"><input type="radio" checked={newRuleType === 'local'} onChange={()=>setNewRuleType('local')} className="accent-[#4a9eff]"/> Local</label>
-                       <label className="flex items-center gap-1 text-xs"><input type="radio" checked={newRuleType === 'remote'} onChange={()=>setNewRuleType('remote')} className="accent-[#4a9eff]"/> Remote</label>
+                  <div className="p-6 space-y-6">
+                    <div className="flex gap-6">
+                       <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={newRuleType === 'local'} onChange={()=>setNewRuleType('local')} className="accent-[#4a9eff]"/> Local</label>
+                       <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={newRuleType === 'remote'} onChange={()=>setNewRuleType('remote')} className="accent-[#4a9eff]"/> Remote</label>
                     </div>
-                    <div className="grid grid-cols-[80px_1fr] gap-y-3 gap-x-4 items-center">
+                    <div className="grid grid-cols-[80px_1fr] gap-y-4 gap-x-4 items-center">
                        <span className="text-xs text-[#888] text-right">Listen Port:</span>
-                       <input type="number" value={newListenPort} onChange={e=>setNewListenPort(parseInt(e.target.value)||0)} className="w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-2 py-1 text-xs focus:outline-none focus:border-[#4a9eff]" />
+                       <input type="number" value={newListenPort} onChange={e=>setNewListenPort(parseInt(e.target.value)||0)} className="w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" />
                        
                        <span className="text-xs text-[#888] text-right">Target Host:</span>
-                       <input type="text" value={newTargetHost} onChange={e=>setNewTargetHost(e.target.value)} className="w-full bg-[#1e1e1e] border border-[#3d3d3d] rounded px-2 py-1 text-xs focus:outline-none focus:border-[#4a9eff]" />
+                       <input type="text" value={newTargetHost} onChange={e=>setNewTargetHost(e.target.value)} className="w-full bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" />
                        
                        <span className="text-xs text-[#888] text-right">Target Port:</span>
-                       <input type="number" value={newTargetPort} onChange={e=>setNewTargetPort(parseInt(e.target.value)||0)} className="w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-2 py-1 text-xs focus:outline-none focus:border-[#4a9eff]" />
+                       <input type="number" value={newTargetPort} onChange={e=>setNewTargetPort(parseInt(e.target.value)||0)} className="w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" />
                     </div>
                     <div className="flex justify-end">
                        <button type="button" onClick={() => {
                           setForwardRules([...forwardRules, { type: newRuleType, listenPort: newListenPort, targetHost: newTargetHost, targetPort: newTargetPort }]);
-                       }} className="px-3 py-1 bg-[#333] hover:bg-[#444] border border-[#3d3d3d] rounded text-xs text-white">Add Rule</button>
+                       }} className="px-4 py-1.5 bg-[#333] hover:bg-[#444] border border-[#3d3d3d] rounded text-xs text-white transition-colors">Add Rule</button>
                     </div>
                     
-                    <div className="mt-4 border border-[#3d3d3d] bg-[#1e1e1e] h-32 overflow-y-auto">
-                       {forwardRules.length === 0 && <div className="p-3 text-xs text-[#666] italic text-center">No forwarding rules configured.</div>}
+                    <div className="border border-[#3d3d3d] bg-[#1e1e1e] h-32 overflow-y-auto rounded block">
+                       {forwardRules.length === 0 && <div className="p-4 text-xs text-[#666] italic text-center">No forwarding rules configured.</div>}
                        {forwardRules.map((r, i) => (
-                         <div key={i} className="flex justify-between items-center p-2 text-xs border-b border-[#3d3d3d] last:border-0 hover:bg-[#2a2a2b]">
+                         <div key={i} className="flex justify-between items-center p-3 text-xs border-b border-[#3d3d3d] last:border-0 hover:bg-[#2a2a2b]">
                            <span><span className="uppercase text-[#4a9eff] font-bold text-[10px] w-14 inline-block">{r.type}</span> {r.listenPort} → {r.targetHost}:{r.targetPort}</span>
-                           <button onClick={() => setForwardRules(forwardRules.filter((_, idx)=>idx!==i))} className="text-[#888] hover:text-[#ff5f57]">Delete</button>
+                           <button onClick={() => setForwardRules(forwardRules.filter((_, idx)=>idx!==i))} className="text-[#888] hover:text-[#ff5f57] transition-colors">Delete</button>
                          </div>
                        ))}
                     </div>
                   </div>
-                  <div className="p-4 border-t border-[#3d3d3d] bg-[#2d2d2d] flex justify-end gap-3 rounded-b">
-                    <button type="button" onClick={() => setShowSSHForwarding(false)} className="px-6 py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors">Done</button>
+                  <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex justify-end gap-3 rounded-b">
+                    <button type="button" onClick={() => setSetupStep(null)} className="px-6 py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors">Done</button>
                   </div>
                 </div>
-              ) : (
-                <form onSubmit={handleConnect} className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch">
-                <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
-                  <span>{t.connSetup}</span>
-                  <button type="button" onClick={() => setShowSetup(false)} className="text-[#888] hover:text-white text-sm leading-none">×</button>
-                </div>
-                
-                <div className="flex border-b border-[#3d3d3d] bg-[#252526]">
-                  <button type="button" onClick={() => setSetupTab('connection')} className={`flex-1 py-2 text-xs font-semibold ${setupTab === 'connection' ? 'bg-[#3d3d3d] text-white' : 'text-[#888] hover:text-[#ccc]'}`}>{t.connection}</button>
-                  <button type="button" onClick={() => setSetupTab('additional')} className={`flex-1 py-2 text-xs font-semibold ${setupTab === 'additional' ? 'bg-[#3d3d3d] text-white' : 'text-[#888] hover:text-[#ccc]'}`}>{t.addSettings}</button>
-                </div>
-
-                <div className="p-6">
-                  {setupTab === 'connection' && (
-                    <>
-                      <div className="flex gap-4 mb-6">
-                        <label className="flex items-center gap-2 text-xs cursor-pointer">
-                          <input type="radio" checked={connType === 'ssh'} onChange={() => setConnType('ssh')} className="accent-[#4a9eff]" /> 
-                          SSH / TCP
-                        </label>
-                        <label className="flex items-center gap-2 text-xs cursor-pointer">
-                          <input type="radio" checked={connType === 'serial'} onChange={() => setConnType('serial')} className="accent-[#4a9eff]" /> 
-                          Serial
-                        </label>
-                      </div>
-
-                      {connType === 'ssh' && (
-                        <div className="space-y-4">
-                          <div className="flex items-center gap-4">
-                            <label className="text-xs text-[#888] w-20 text-right">Host:</label>
-                            <input type="text" value={sshHost} onChange={e => setSshHost(e.target.value)} placeholder="IP or Hostname" className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" required />
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <label className="text-xs text-[#888] w-20 text-right">Port:</label>
-                            <input type="number" value={sshPort} onChange={e => setSshPort(e.target.value)} className="w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" />
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <label className="text-xs text-[#888] w-20 text-right">Username:</label>
-                            <input type="text" value={sshUser} onChange={e => setSshUser(e.target.value)} className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" required />
-                          </div>
-                          <div className="flex items-center gap-4">
-                            <label className="text-xs text-[#888] w-20 text-right">Auth:</label>
-                            <select value={authMethod} onChange={e => setAuthMethod(e.target.value as 'password'|'key')} className="w-32 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]">
-                              <option value="password">Password</option>
-                              <option value="key">Private Key</option>
-                            </select>
-                          </div>
-                          {authMethod === 'password' && (
-                              <div className="flex items-center gap-4">
-                                <label className="text-xs text-[#888] w-20 text-right">Password:</label>
-                                <input type="password" value={sshPass} onChange={e => setSshPass(e.target.value)} className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" />
-                              </div>
-                          )}
-                          {authMethod === 'key' && (
-                              <div className="flex items-start gap-4">
-                                <label className="text-xs text-[#888] w-20 text-right mt-1.5">Private Key:</label>
-                                <textarea value={sshKey} onChange={e => setSshKey(e.target.value)} placeholder="-----BEGIN PRIVATE KEY-----..." className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff] h-20 resize-none font-mono text-[10px]"></textarea>
-                              </div>
-                          )}
-                          <div className="flex justify-end pt-2">
-                            <button type="button" onClick={() => setShowSSHForwarding(true)} className="text-xs text-[#4a9eff] hover:underline underline-offset-2">SSH Forwarding Setup...</button>
-                          </div>
-                        </div>
-                      )}
-
-                      {connType === 'serial' && (
-                        <div className="space-y-4">
-                          <div className="flex items-center gap-4">
-                            <label className="text-xs text-[#888] w-20 text-right">Baud Rate:</label>
-                            <select value={serialBaud} onChange={e => setSerialBaud(e.target.value)} className="w-32 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]">
-                              <option value="4800">4800</option>
-                              <option value="9600">9600</option>
-                              <option value="19200">19200</option>
-                              <option value="38400">38400</option>
-                              <option value="57600">57600</option>
-                              <option value="115200">115200</option>
-                            </select>
-                          </div>
-                          <p className="text-[10px] text-[#666] ml-24 mt-2">Browser will prompt for COM port selection.</p>
-                        </div>
-                      )}
-                    </>
-                  )}
-                  {setupTab === 'additional' && (
-                    <div className="space-y-6 py-2">
-                      <div>
-                        <label className="flex items-center gap-2 text-xs text-[#ccc] cursor-pointer">
-                          <input type="checkbox" checked={autoLog} onChange={e => setAutoLog(e.target.checked)} className="accent-[#4a9eff]" />
-                          Auto Log (Download on disconnect)
-                        </label>
-                        <p className="text-[10px] text-[#888] ml-5 mt-1">Logs all output and downloads automatically when the connection is closed.</p>
-                      </div>
-                      
-                      <div className="space-y-3">
-                        <span className="text-xs text-[#ccc] font-medium border-b border-[#3d3d3d] pb-1 block">{t.pDelay}</span>
-                        <div className="flex items-center gap-4 ml-2">
-                          <label className="text-xs text-[#888] w-24">{t.charDelay}</label>
-                          <input type="number" value={delayChar} min="0" onChange={e => setDelayChar(parseInt(e.target.value) || 0)} className="w-20 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-2 py-1 text-xs focus:outline-none focus:border-[#4a9eff]" />
-                        </div>
-                        <div className="flex items-center gap-4 ml-2">
-                          <label className="text-xs text-[#888] w-24">{t.lineDelay}</label>
-                          <input type="number" value={delayLine} min="0" onChange={e => setDelayLine(parseInt(e.target.value) || 0)} className="w-20 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-2 py-1 text-xs focus:outline-none focus:border-[#4a9eff]" />
-                        </div>
-                      </div>
-                      <div className="space-y-3 mt-6">
-                        <span className="text-xs text-[#ccc] font-medium border-b border-[#3d3d3d] pb-1 block">{t.encoding}</span>
-                        <div className="flex items-center gap-4 ml-2">
-                          <label className="text-xs text-[#888] w-24">Receive/Send:</label>
-                          <select value={encoding} onChange={e => setEncoding(e.target.value)} className="w-32 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-2 py-1 text-xs focus:outline-none focus:border-[#4a9eff]">
-                            <option value="utf-8">UTF-8</option>
-                            <option value="shift-jis">Shift-JIS</option>
-                            <option value="euc-jp">EUC-JP</option>
-                          </select>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </div>
-
-                <div className="p-4 border-t border-[#3d3d3d] bg-[#2d2d2d] flex justify-end gap-3 rounded-b">
-                  <button type="button" onClick={() => setShowSetup(false)} className="px-4 py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors">
-                    Cancel
-                  </button>
-                  <button type="submit" className="px-6 py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors">
-                    OK
-                  </button>
-                </div>
-              </form>
               )}
             </div>
           ) : null}
@@ -580,7 +643,7 @@ export default function App() {
                onDisconnect={() => { 
                  if ((autoLog || isLogging) && sessionLogRef.current) downloadSessionLog();
                  setActiveConfig(null); 
-                 setShowSetup(true); 
+                 setSetupStep('new_conn'); 
                  setIsLogging(false);
                }} 
                pendingMacro={pendingMacro}
