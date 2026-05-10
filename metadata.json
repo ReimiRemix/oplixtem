@@ -1,0 +1,11 @@
+{
+  "name": "Web TeraTerm",
+  "description": "A browser-based terminal emulator with SSH, Web Serial support, and macros.",
+  "requestFramePermissions": [
+    "camera",
+    "microphone",
+    "geolocation",
+    "serial"
+  ],
+  "majorCapabilities": []
+}
