@@ -333,16 +333,36 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
              }
 
              if (commandExecRef.current && cmd) commandExecRef.current(cmd, isValid);
-             term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+
+             const ssh = shellRef.current.sshSession;
+             const pUser = ssh ? ssh.user : (config.username || 'user');
+             const pHost = ssh ? ssh.host : config.host;
+             term.write(`\x1b[35m${pUser}@${pHost}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+
+             if (ssh) {
+                 setTimeout(() => {
+                     term.writeln('exit');
+                     term.writeln('logout');
+                     term.writeln(`Connection to ${ssh.host} closed.`);
+                     shellRef.current.sshSession = null;
+                     term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+                 }, 1500);
+             }
            } else {
-             term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+             const ssh = shellRef.current.sshSession;
+             const pUser = ssh ? ssh.user : (config.username || 'user');
+             const pHost = ssh ? ssh.host : config.host;
+             term.write(`\x1b[35m${pUser}@${pHost}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
            }
         } else if (data === '\x1b[A') { // Up
            if (historyIndex.current > 0) {
                historyIndex.current--;
                const cmd = history.current[historyIndex.current];
                term.write('\r\x1b[K');
-               term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${cmd}`);
+               const ssh = shellRef.current.sshSession;
+               const pUser = ssh ? ssh.user : (config.username || 'user');
+               const pHost = ssh ? ssh.host : config.host;
+               term.write(`\x1b[35m${pUser}@${pHost}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${cmd}`);
                currentLine = cmd;
            }
         } else if (data === '\x1b[B') { // Down
@@ -350,17 +370,26 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
                historyIndex.current++;
                const cmd = history.current[historyIndex.current];
                term.write('\r\x1b[K');
-               term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${cmd}`);
+               const ssh = shellRef.current.sshSession;
+               const pUser = ssh ? ssh.user : (config.username || 'user');
+               const pHost = ssh ? ssh.host : config.host;
+               term.write(`\x1b[35m${pUser}@${pHost}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${cmd}`);
                currentLine = cmd;
            } else {
                historyIndex.current = history.current.length;
                currentLine = '';
                term.write('\r\x1b[K');
-               term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+               const ssh = shellRef.current.sshSession;
+               const pUser = ssh ? ssh.user : (config.username || 'user');
+               const pHost = ssh ? ssh.host : config.host;
+               term.write(`\x1b[35m${pUser}@${pHost}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
            }
         } else if (char === '\x0C') { // Ctrl+L
            term.clear();
-           term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${currentLine}`);
+           const ssh = shellRef.current.sshSession;
+           const pUser = ssh ? ssh.user : (config.username || 'user');
+           const pHost = ssh ? ssh.host : config.host;
+           term.write(`\x1b[35m${pUser}@${pHost}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${currentLine}`);
         } else if (char === '\t') { // Tab
            const commands = ['pwd', 'cd', 'ls', 'cat', 'touch', 'mkdir', 'cp', 'mv', 'rm', 'rmdir', 'chmod', 'chown', 'grep', 'ps', 'top', 'whoami', 'uname', 'hostname', 'id', 'who', 'w', 'df', 'free', 'echo', 'uptime', 'history', 'clear', 'date', 'cal', 'man', 'ssh', 'sudo', 'systemctl', 'ip', 'dig', 'tar', 'sed', 'awk', 'tr', 'find', 'which', 'alias', 'bg', 'fg', 'jobs', 'kill', 'ping', 'curl', 'env', 'passwd', 'read', 'lsattr', 'chattr', 'split', 'dmesg', 'mount', 'strings', 'nmap', 'traceroute', 'tcpdump', 'strace', 'ulimit', 'chsh', 'ntpdate', 'iostat', 'sar', 'fallocate'];
            

@@ -5,6 +5,7 @@ export class Shell {
   currentDir: string = '/home/user';
   username: string = 'user';
   hostname: string = 'training';
+  sshSession: { user: string; host: string } | null = null;
 
   constructor(vfs: VirtualFileSystem) {
     this.vfs = vfs;
@@ -278,8 +279,47 @@ export class Shell {
           result = this.man(args[1]);
           break;
         case 'ssh':
-          result = `ssh: connect to host ${args[args.length-1] || 'localhost'} port 22: Connection refused`;
-          break;
+          const isL = args.includes('-L');
+          const isI = args.includes('-i');
+          const pIdx = args.indexOf('-p');
+          const port = pIdx !== -1 ? args[pIdx + 1] : '22';
+          const targetArg = args[args.length - 1] || 'localhost';
+          
+          let user = 'user';
+          let host = targetArg;
+          if (targetArg.includes('@')) {
+             const parts = targetArg.split('@');
+             user = parts[0];
+             host = parts[1];
+          }
+
+          if (isL) {
+             return `Forwarding port from localhost to ${host}... Connected.`;
+          }
+
+          // If it's a valid remote host (simulated)
+          const isRemote = host.includes('.') || host !== 'localhost';
+
+          if (isI) {
+             const keyFile = args[args.indexOf('-i') + 1];
+             if (isRemote) {
+                this.sshSession = { user, host };
+                return `auth: using key file ${keyFile}\nWelcome to ${host}! (SSH session started)`;
+             }
+             return `auth: using key file ${keyFile}\nWelcome to ${host}!`;
+          }
+          if (port !== '22') {
+             if (isRemote || port === '2222') {
+                this.sshSession = { user, host };
+                return `Connected to ${host} on port ${port}.\nWelcome to ${host}! (SSH session started)`;
+             }
+             return `Connected to ${host} on port ${port}.`;
+          }
+          if (isRemote && !targetArg.includes('localhost')) {
+             this.sshSession = { user, host };
+             return `Welcome to ${host}! (SSH session started)`;
+          }
+          return `ssh: connect to host ${targetArg} port 22: Connection refused`;
         case 'sudo':
           if (args[1] === 'su' || args[1] === 'bash' || args[1] === 'sh') {
              result = 'root@training:~# ';

@@ -204,6 +204,10 @@ export const generateTrainingTasks = (sshHost: string, sshUser: string, sshPort:
     { id: 'e18', level: 'エキスパート', title: 'スクリプト実行', desc: 'カレントディレクトリの script.sh を現在のシェルで読み込んで実行してください。', expectedCmd: 'source ./script.sh', validator: (c) => /^(source|\.)\s+\.\/script\.sh/.test(c.trim()), completedMsg: '反映。', hint: 'source' },
     { id: 'e19', level: 'エキスパート', title: 'ファイル数制限', desc: '現在のシェルの最大オープンファイル数（ulimit）を確認してください。', expectedCmd: 'ulimit -n', validator: (c) => /ulimit\s+-n/.test(c.trim()), completedMsg: '限界確認。', hint: 'ulimit -n' },
     { id: 'e20', level: 'エキスパート', title: 'システムコール', desc: 'lsコマンドが発行するシステムコールを追跡してください。', expectedCmd: 'strace ls', validator: (c) => /strace/.test(c.trim()), completedMsg: '内部告発。', hint: 'strace' },
+    { id: 'e21', level: 'エキスパート', title: 'ポート指定SSH', desc: '2222番ポートで待ち受けているサーバー 192.168.1.100 にログインしてください。', expectedCmd: 'ssh -p 2222 user@192.168.1.100', validator: (c) => /ssh\s+.*-p\s*2222/.test(c.trim()), completedMsg: 'ポート指定成功。', hint: '-p オプション' },
+    { id: 'e22', level: 'エキスパート', title: 'ポートフォワード', desc: 'リモートサーバー(10.0.0.5)のMySQLポート(3306)を、ローカルの8888番ポートに転送してください。', expectedCmd: 'ssh -L 8888:localhost:3306 user@10.0.0.5', validator: (c) => /ssh\s+.*-L\s*8888:localhost:3306/.test(c.trim()), completedMsg: 'トンネル開通。', hint: '-L ローカルポート:リモートホスト:リモートポート' },
+    { id: 'e23', level: 'エキスパート', title: '秘密鍵ログイン', desc: 'ホーム内の ~/.ssh/id_rsa を使って、192.168.1.50 にログインしてください。', expectedCmd: 'ssh -i ~/.ssh/id_rsa user@192.168.1.50', validator: (c) => /ssh\s+.*-i/.test(c.trim()), completedMsg: '鍵認証成功。', hint: '-i 秘密鍵パス' },
+    { id: 'e24', level: 'エキスパート', title: '設定ファイル確認', desc: 'SSHのクライアント設定ファイル(~/.ssh/config)の内容を確認してください。', expectedCmd: 'cat ~/.ssh/config', validator: (c) => /cat\s+.*\.ssh\/config/.test(c.trim()), completedMsg: '構成確認。', hint: '~/.ssh/config' },
   ];
 
   return tasks.map(t => ({ ...t, validator: t.validator || ((c: string) => aiValidator(t, c)) }));

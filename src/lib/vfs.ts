@@ -37,6 +37,10 @@ export class VirtualFileSystem {
     this.mkdir('/home/user/Desktop');
     this.mkdir('/home/user/Documents');
     this.mkdir('/home/user/Downloads');
+    this.mkdir('/home/user/.ssh');
+    this.touch('/home/user/.ssh/id_rsa', '-----BEGIN RSA PRIVATE KEY-----\nMIIEpAIBAAKCAQEA7...\n');
+    this.touch('/home/user/.ssh/id_rsa.pub', 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQ...\n');
+    this.touch('/home/user/.ssh/config', 'Host bastion\n  HostName 192.168.100.1\n  User jumpserver\n\nHost production\n  HostName 172.16.28.152\n  ProxyJump bastion\n');
     this.touch('/home/user/file.txt', 'This is a test file.');
   }
 
