@@ -3,6 +3,8 @@ import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
 import { io, Socket } from 'socket.io-client';
 import 'xterm/css/xterm.css';
+import { VirtualFileSystem } from '../lib/vfs';
+import { Shell } from '../lib/shell';
 
 export interface ConnectConfig {
   type: 'ssh' | 'serial';
@@ -23,11 +25,12 @@ export interface ForwardRule {
   targetPort: number;
 }
 
-interface TerminalProps {
+import { TrainingTask } from '../tasks';
+
+export interface TerminalProps {
   config: ConnectConfig | null;
   onDisconnect: () => void;
-  pendingMacro?: string | null;
-  onMacroExecuted?: () => void;
+  onCommandExecuted?: (cmd: string, isValid?: boolean) => void;
   pendingPaste?: string | null;
   onPasteExecuted?: () => void;
   pasteDelay?: { char: number; line: number };
@@ -36,9 +39,11 @@ interface TerminalProps {
   pendingUploadFiles?: File[] | null;
   onUploadExecuted?: () => void;
   copyTrigger?: number;
+  currentTask?: TrainingTask;
 }
 
-export default function TerminalSimulator({ config, onDisconnect, pendingMacro, onMacroExecuted, pendingPaste, onPasteExecuted, pasteDelay, onDataReceived, onRequestPasteDelay, pendingUploadFiles, onUploadExecuted, copyTrigger }: TerminalProps) {
+export default function TerminalSimulator({ config, onDisconnect, onCommandExecuted, pendingPaste, onPasteExecuted, pasteDelay, onDataReceived, onRequestPasteDelay, pendingUploadFiles, onUploadExecuted, copyTrigger, currentTask }: TerminalProps) {
+
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -47,7 +52,17 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
   const serialWriterRef = useRef<any>(null);
   const serialReaderRef = useRef<any>(null);
 
+  const vfsRef = useRef(new VirtualFileSystem());
+  const shellRef = useRef(new Shell(vfsRef.current));
+
   const [status, setStatus] = useState<string>('Disconnected');
+  const history = useRef<string[]>([]);
+  const historyIndex = useRef<number>(-1);
+
+  const pasteParamsRef = useRef({ pasteDelay, onRequestPasteDelay });
+  useEffect(() => {
+    pasteParamsRef.current = { pasteDelay, onRequestPasteDelay };
+  }, [pasteDelay, onRequestPasteDelay]);
 
   useEffect(() => {
     if (!terminalRef.current) return;
@@ -66,8 +81,19 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
     
     const fitAddon = new FitAddon();
     term.loadAddon(fitAddon);
-    term.open(terminalRef.current);
-    fitAddon.fit();
+    
+    setTimeout(() => {
+        if (terminalRef.current && xtermRef.current) {
+            try {
+                if (!xtermRef.current.element) {
+                    xtermRef.current.open(terminalRef.current);
+                }
+                fitAddon.fit();
+            } catch (e) {
+                console.error("Fit error", e);
+            }
+        }
+    }, 200);
 
     xtermRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -87,21 +113,14 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
 
     const handleDrop = async (e: DragEvent) => {
       e.preventDefault();
-      if (!config || config.type !== 'ssh' || !socketRef.current) return;
       
       const files = Array.from(e.dataTransfer?.files || []);
       for (const file of files) {
         term.writeln(`\r\n\x1b[36m[SFTP] Starting upload for ${file.name} (${Math.round(file.size/1024)} KB)...\x1b[0m`);
-        try {
-          const arrayBuffer = await file.arrayBuffer();
-          socketRef.current.emit('ssh-sftp-upload', {
-            filename: file.name,
-            path: './' + file.name,
-            data: arrayBuffer
-          });
-        } catch (err) {
-          term.writeln(`\r\n\x1b[31m[SFTP Error] Could not read file.\x1b[0m\r\n`);
-        }
+        setTimeout(() => {
+           term.writeln(`\x1b[32m[SFTP] Upload complete: ${file.name}\x1b[0m\r\n`);
+           term.write('\x1b[35mpenguin@training\x1b[0m:\x1b[34m~\x1b[0m$ ');
+        }, 500);
       }
     };
 
@@ -109,6 +128,7 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
     terminalRef.current?.addEventListener('drop', handleDrop);
 
     const handlePasteEvent = (e: ClipboardEvent) => {
+      const { pasteDelay, onRequestPasteDelay } = pasteParamsRef.current;
       if (pasteDelay && (pasteDelay.char > 0 || pasteDelay.line > 0)) {
         const text = e.clipboardData?.getData('text/plain');
         if (text) {
@@ -126,7 +146,7 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
       window.removeEventListener('resize', handleResize);
       term.dispose();
     };
-  }, [pasteDelay, onRequestPasteDelay]);
+  }, []);
 
   const writeToServer = useCallback((data: string) => {
     if (config?.type === 'ssh' && socketRef.current) {
@@ -135,17 +155,6 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
       serialWriterRef.current.write(new TextEncoder().encode(data));
     }
   }, [config]);
-
-  useEffect(() => {
-    if (pendingMacro && pendingMacro.trim()) {
-      const executeMacro = (command: string) => {
-        const processedCmd = command.replace(/\\n/g, '\r\n').replace(/\\r/g, '\r');
-        writeToServer(processedCmd);
-      };
-      executeMacro(pendingMacro);
-      if (onMacroExecuted) onMacroExecuted();
-    }
-  }, [pendingMacro, writeToServer, onMacroExecuted]);
 
   useEffect(() => {
     if (copyTrigger && copyTrigger > 0) {
@@ -158,21 +167,14 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
   }, [copyTrigger]);
 
   useEffect(() => {
-    if (pendingUploadFiles && pendingUploadFiles.length > 0 && socketRef.current) {
+    if (pendingUploadFiles && pendingUploadFiles.length > 0) {
         const term = xtermRef.current;
         const uploadFiles = async () => {
             for (const file of pendingUploadFiles) {
                 term?.writeln(`\r\n\x1b[36m[SFTP] Starting upload for ${file.name} (${Math.round(file.size/1024)} KB)...\x1b[0m`);
-                try {
-                    const arrayBuffer = await file.arrayBuffer();
-                    socketRef.current?.emit('ssh-sftp-upload', {
-                        filename: file.name,
-                        path: './' + file.name,
-                        data: arrayBuffer
-                    });
-                } catch (err) {
-                    term?.writeln(`\r\n\x1b[31m[SFTP Error] Could not read file.\x1b[0m\r\n`);
-                }
+                await new Promise(res => setTimeout(res, 500));
+                term?.writeln(`\x1b[32m[SFTP] Upload complete: ${file.name}\x1b[0m\r\n`);
+                term?.write('\x1b[35mpenguin@training\x1b[0m:\x1b[34m~\x1b[0m$ ');
             }
             if (onUploadExecuted) onUploadExecuted();
         }
@@ -208,6 +210,16 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
     }
   }, [pendingPaste, writeToServer, onPasteExecuted, pasteDelay]);
 
+  const commandExecRef = useRef(onCommandExecuted);
+  useEffect(() => {
+     commandExecRef.current = onCommandExecuted;
+  }, [onCommandExecuted]);
+
+  const currentTaskRef = useRef(currentTask);
+  useEffect(() => {
+     currentTaskRef.current = currentTask;
+  }, [currentTask]);
+
   useEffect(() => {
     const term = xtermRef.current;
     if (!term || !config) {
@@ -218,75 +230,197 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
     }
 
     term.clear();
-    term.writeln(`\x1b[36mConnecting to ${config.type}...\x1b[0m`);
+    term.writeln(`\x1b[36m${config.type} に接続中...\x1b[0m`);
 
-    const onDataDisposable = term.onData((data) => {
-      writeToServer(data);
-    });
+    let currentLine = '';
+    let isMock = config.type === 'ssh';
+    
+    // We bind onData based on mock status later
+    let onDataDisposable: any;
 
-    setStatus('Connecting...');
+    setStatus('接続中...');
 
-    if (config.type === 'ssh') {
-      const socket = io();
-      socketRef.current = socket;
-
-      socket.on('connect', () => {
-        socket.emit('ssh-connect', {
-          host: config.host,
-          port: config.port,
-          username: config.username,
-          password: config.password,
-          privateKey: config.privateKey,
-        });
-      });
-
-      socket.on('ssh-ready', () => setStatus('Authenticating...'));
-      socket.on('ssh-shell-started', () => {
-        setStatus('Connected');
-        term.writeln('\x1b[32m[SSH Connected]\x1b[0m');
-        if (fitAddonRef.current) {
-          socket.emit('ssh-resize', { cols: term.cols, rows: term.rows });
-        }
-        
-        // Start Port Forwarding if configured
-        if (config.forwardRules && config.forwardRules.length > 0) {
-          config.forwardRules.forEach((rule) => {
-             if (rule.type === 'local') {
-               socket.emit('ssh-forward-local', { localPort: rule.listenPort, targetHost: rule.targetHost, targetPort: rule.targetPort });
-               term.writeln(`\x1b[36m[Forward local] port ${rule.listenPort} -> ${rule.targetHost}:${rule.targetPort}\x1b[0m`);
-             } else if (rule.type === 'remote') {
-               // Update the logic in server.ts to handle targetHost and targetPort for remote forwarding properly.
-               socket.emit('ssh-forward-remote', { remotePort: rule.listenPort, targetHost: rule.targetHost, targetPort: rule.targetPort });
-               term.writeln(`\x1b[36m[Forward remote] port ${rule.listenPort} -> ${rule.targetHost}:${rule.targetPort}\x1b[0m`);
+    if (isMock) {
+      setTimeout(() => {
+        setStatus('認証中...');
+        setTimeout(() => {
+          setStatus('Connected');
+          term.writeln('\x1b[32m[トレーニングサーバーにSSH接続されました]\x1b[0m');
+          term.write(`\r\n\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+          
+          if (commandExecRef.current) {
+             let isValid = false;
+             let reasonStr = '';
+             if (currentTask && currentTask.validator) {
+                 // The validator for b1 will return true if config matches
+                 Promise.resolve(currentTask.validator('ssh', config || undefined)).then(res => {
+                     if (typeof res === 'object' && res !== null) {
+                         isValid = res.valid;
+                         reasonStr = res.reason || '';
+                     } else {
+                         isValid = !!res;
+                     }
+                     if (!isValid) {
+                         term.writeln('\x1b[31mエラー: 指定された接続先(Host/User)が課題と一致しません。\x1b[0m');
+                         if (reasonStr) term.writeln(`\x1b[31m理由: ${reasonStr}\x1b[0m`);
+                         term.writeln('\x1b[33m自動的に切断します。「Connect」からやり直してください。\x1b[0m');
+                         setTimeout(() => {
+                             if (onDisconnect) onDisconnect();
+                         }, 2000);
+                     }
+                     commandExecRef.current!('ssh', isValid);
+                 });
+             } else {
+                 commandExecRef.current('ssh', false);
              }
-          });
-        }
-      });
-      socket.on('ssh-forward-started', (info) => {
-         term.writeln(`\x1b[32m[Forward setup successful] ${info.type} port ${info.localPort}\x1b[0m`);
-      });
-      socket.on('ssh-data', (data) => {
-        let text = data;
-        if (data instanceof ArrayBuffer || data instanceof Uint8Array) {
-           text = new TextDecoder(config.encoding || 'utf-8').decode(data);
-        } else if (typeof data === 'string') {
-           text = data;
-        }
-        term.write(text);
-        if (onDataReceived) onDataReceived(text);
-      });
-      socket.on('ssh-error', (err) => {
-        setStatus('Error');
-        term.writeln(`\r\n\x1b[31m[SSH Error] ${err}\x1b[0m`);
-      });
-      socket.on('ssh-close', () => {
-        setStatus('Disconnected');
-        term.writeln('\r\n\x1b[33m[Connection closed]\x1b[0m');
-        onDisconnect();
-      });
+          }
+        }, 1000);
+      }, 500);
 
+      onDataDisposable = term.onData(async (data) => {
+        const char = data;
+        if (char === '\r') {
+           term.writeln('');
+           const cmd = currentLine.trim();
+           if (cmd) {
+               history.current.push(cmd);
+               historyIndex.current = history.current.length;
+           }
+           currentLine = '';
+           
+           if (cmd) {
+             const norm = cmd.trim().replace(/\s+/g, ' ');
+             let isValid = false;
+             const activeTask = currentTaskRef.current;
+             
+             // Run the simulation in Virtual Shell
+             if (cmd === 'clear') {
+                 term.clear();
+             } else {
+                 const output = shellRef.current.execute(cmd);
+                 if (output) {
+                     output.split('\n').forEach(line => term.writeln(line));
+                 }
+             }
+
+             // Validation logic silently running
+             if (activeTask) {
+                 if (activeTask.validator) {
+                    const res = await activeTask.validator(norm, config || undefined);
+                    // Provide the VFS state to validator if needed later, but standard checking first:
+                    if (typeof res === 'object' && res !== null) {
+                        isValid = res.valid;
+                    } else {
+                        isValid = !!res;
+                    }
+                    
+                    // Specific validators overridden by VFS outcomes
+                    if (activeTask.id === 'b10') isValid = norm.startsWith('touch') && !!vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'file.txt'));
+                    if (activeTask.id === 'b11') isValid = norm.startsWith('mkdir') && !!vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'newdir'));
+                    if (activeTask.id === 'b12') isValid = norm.startsWith('cp') && !!vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'copy_file.txt'));
+                    if (activeTask.id === 'b13') isValid = norm.startsWith('mv') && !!vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'renamed_file.txt'));
+                    if (activeTask.id === 'b14') isValid = norm.startsWith('rm') && !vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'renamed_file.txt'));
+                    if (activeTask.id === 'b15') isValid = (norm.startsWith('rmdir') || (norm.startsWith('rm') && norm.includes('-r'))) && !vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'newdir'));
+                    if (activeTask.id === 'b6') isValid = norm.startsWith('cd') && shellRef.current.pwd() === '/etc';
+                    if (activeTask.id === 'b7') isValid = norm.startsWith('cd') && shellRef.current.pwd() === '/';
+                    if (activeTask.id === 'b8') isValid = /^cd(\s+~)?$/.test(norm) && shellRef.current.pwd() === '/home/user';
+                 } else {
+                    isValid = norm === activeTask.expectedCmd;
+                 }
+             }
+
+             if (commandExecRef.current && cmd) commandExecRef.current(cmd, isValid);
+             term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+           } else {
+             term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+           }
+        } else if (data === '\x1b[A') { // Up
+           if (historyIndex.current > 0) {
+               historyIndex.current--;
+               const cmd = history.current[historyIndex.current];
+               term.write('\r\x1b[K');
+               term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${cmd}`);
+               currentLine = cmd;
+           }
+        } else if (data === '\x1b[B') { // Down
+           if (historyIndex.current < history.current.length - 1) {
+               historyIndex.current++;
+               const cmd = history.current[historyIndex.current];
+               term.write('\r\x1b[K');
+               term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${cmd}`);
+               currentLine = cmd;
+           } else {
+               historyIndex.current = history.current.length;
+               currentLine = '';
+               term.write('\r\x1b[K');
+               term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+           }
+        } else if (char === '\x0C') { // Ctrl+L
+           term.clear();
+           term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${currentLine}`);
+        } else if (char === '\t') { // Tab
+           const commands = ['pwd', 'cd', 'ls', 'cat', 'touch', 'mkdir', 'cp', 'mv', 'rm', 'rmdir', 'echo', 'clear', 'date', 'cal', 'man', 'ssh'];
+           
+           const parts = currentLine.split(' ');
+           if (parts.length === 1) { // Command completion
+               const matches = commands.filter(c => c.startsWith(parts[0]));
+               if (matches.length === 1) {
+                   const append = matches[0].substring(parts[0].length) + ' ';
+                   currentLine += append;
+                   term.write(append);
+               } else if (matches.length > 1) {
+                   term.writeln('');
+                   term.writeln(matches.join('  '));
+                   term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${currentLine}`);
+               }
+           } else { // File/dir completion
+               const partialPath = parts[parts.length - 1];
+               let searchDir = shellRef.current.currentDir;
+               let searchPrefix = partialPath;
+               if (partialPath.includes('/')) {
+                  const splitIdx = partialPath.lastIndexOf('/');
+                  const dirPart = partialPath.substring(0, splitIdx);
+                  searchDir = vfsRef.current.resolvePath(shellRef.current.currentDir, dirPart || '/');
+                  searchPrefix = partialPath.substring(splitIdx + 1);
+               }
+               const node = vfsRef.current.getNode(searchDir);
+               if (node && node.type === 'dir' && node.children) {
+                  const allNames = Object.keys(node.children);
+                  if (searchDir === shellRef.current.currentDir) {
+                     allNames.push('.', '..');
+                  }
+                  const matches = allNames.filter(n => n.startsWith(searchPrefix));
+                  if (matches.length === 1) {
+                      let append = matches[0].substring(searchPrefix.length);
+                      if (node.children[matches[0]]?.type === 'dir') append += '/';
+                      else append += ' ';
+                      currentLine += append;
+                      term.write(append);
+                  } else if (matches.length > 1) {
+                      term.writeln('');
+                      const isDir = (n: string) => node.children?.[n]?.type === 'dir' || n === '.' || n === '..';
+                      term.writeln(matches.map(n => isDir(n) ? `\x1b[1;34m${n}\x1b[0m` : n).join('  '));
+                      term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${currentLine}`);
+                  }
+               }
+           }
+        } else if (char === '\x7F') { // Backspace
+           if (currentLine.length > 0) {
+             currentLine = currentLine.slice(0, -1);
+             term.write('\b \b');
+           }
+        } else if (char.startsWith('\x1b')) {
+           // Ignore arrow keys and other ANSI escapes in this simple mock
+        } else {
+           currentLine += char;
+           term.write(char);
+        }
+      });
     } else if (config.type === 'serial') {
       let isReading = true;
+      onDataDisposable = term.onData((data) => {
+        writeToServer(data);
+      });
       const connectSerial = async () => {
         try {
           // Requires HTTPS or localhost
@@ -340,7 +474,9 @@ export default function TerminalSimulator({ config, onDisconnect, pendingMacro, 
     }
 
     return () => {
-      onDataDisposable.dispose();
+      if (onDataDisposable) {
+        onDataDisposable.dispose();
+      }
       if (socketRef.current) {
         socketRef.current.disconnect();
         socketRef.current = null;

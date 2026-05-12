@@ -1,7 +1,10 @@
 import React, { useState, useEffect, useRef } from 'react';
 import TerminalSimulator, { ConnectConfig, ForwardRule } from './components/TerminalSimulator';
+import Home from './components/Home';
+import { generateTrainingTasks, TrainingTask, initialSshHost, initialSshUser } from './tasks';
 
 export default function App() {
+  const [showHome, setShowHome] = useState(true);
   const [activeConfig, setActiveConfig] = useState<ConnectConfig | null>(null);
   
   // Connection Form State
@@ -42,7 +45,7 @@ export default function App() {
       terminal: 'Terminal...', font: 'Font...', keyboard: 'Keyboard...', serialPort: 'Serial port...', proxy: 'Proxy...',
       ssh: 'SSH...', sshAuth: 'SSH Authentication...', sshFwd: 'SSH Forwarding...', sshKeygen: 'SSH Keygenerator...', tcpip: 'TCP/IP...', general: 'General...', addSettings: 'Additional settings...',
       saveSetup: 'Save setup...', restoreSetup: 'Restore setup...', setupDir: 'Setup directory...', loadKeyMap: 'Load key map...',
-      macro: 'Macro', noWindows: 'No windows...', about: 'About Web OplixTerminal...',
+      noWindows: 'No windows...', about: 'About Web OplixTerminal...',
       pDelay: 'Paste Delay', charDelay: 'Char Delay (ms):', lineDelay: 'Line Delay (ms):', encoding: 'Character Encoding',
       connSetup: 'OplixTerminal Setup', connection: 'Connection'
     },
@@ -56,7 +59,7 @@ export default function App() {
       terminal: '端末...', font: 'フォント...', keyboard: 'キーボード...', serialPort: 'シリアルポート...', proxy: 'プロキシ...',
       ssh: 'SSH...', sshAuth: 'SSH 認証...', sshFwd: 'SSH 転送...', sshKeygen: 'SSH 鍵生成...', tcpip: 'TCP/IP...', general: '全般...', addSettings: '追加設定...',
       saveSetup: '設定を保存...', restoreSetup: '設定を復元...', setupDir: '設定ディレクトリ...', loadKeyMap: 'キーマップ読み込み...',
-      macro: 'マクロ', noWindows: 'ウィンドウなし...', about: 'Web OplixTerminal について...',
+      noWindows: 'ウィンドウなし...', about: 'Web OplixTerminal について...',
       pDelay: 'ペースト遅延', charDelay: '文字遅延 (ms):', lineDelay: '行遅延 (ms):', encoding: '文字エンコーディング',
       connSetup: 'OplixTerminal 設定', connection: '接続'
     }
@@ -87,16 +90,15 @@ export default function App() {
   const [newTargetHost, setNewTargetHost] = useState('localhost');
   const [newTargetPort, setNewTargetPort] = useState(80);
 
-  // Macro State
-  const [macros, setMacros] = useState<{name: string; command: string}[]>([]);
-  const [newMacroName, setNewMacroName] = useState('');
-  const [newMacroCmd, setNewMacroCmd] = useState('');
-  const [showMacroEditor, setShowMacroEditor] = useState(false);
+  // Training Tasks State
+  const [tasks, setTasks] = useState<TrainingTask[]>(() => generateTrainingTasks(initialSshHost, initialSshUser, '22'));
+  const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
+  const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(new Set());
   
   // App State
-  const [pendingMacro, setPendingMacro] = useState<string | null>(null);
   const [timeStr, setTimeStr] = useState('');
   const [quickCmd, setQuickCmd] = useState('');
+  const [showTasksMobile, setShowTasksMobile] = useState(false);
 
   useEffect(() => {
     const timer = setInterval(() => {
@@ -107,10 +109,6 @@ export default function App() {
 
   // Persistence
   useEffect(() => {
-    const saved = localStorage.getItem('wt-macros');
-    if (saved) {
-      try { setMacros(JSON.parse(saved)); } catch (e) {}
-    }
     const savedAdditional = localStorage.getItem('wt-additional');
     if (savedAdditional) {
       try {
@@ -122,10 +120,6 @@ export default function App() {
       } catch (e) {}
     }
   }, []);
-
-  useEffect(() => {
-    localStorage.setItem('wt-macros', JSON.stringify(macros));
-  }, [macros]);
 
   useEffect(() => {
     localStorage.setItem('wt-additional', JSON.stringify({ autoLog, delayChar, delayLine, encoding }));
@@ -140,6 +134,13 @@ export default function App() {
     a.download = `oplixterminal_log_${new Date().toISOString().replace(/[:.]/g, '-')}.txt`;
     a.click();
     URL.revokeObjectURL(url);
+  };
+
+  const handleCommandExecuted = async (cmd: string, isValid?: boolean) => {
+    if (isValid && currentTaskIndex < tasks.length) {
+       const task = tasks[currentTaskIndex];
+       setCompletedTaskIds(prev => new Set(prev).add(task.id));
+    }
   };
 
   const handleConnect = (e: React.FormEvent) => {
@@ -157,25 +158,15 @@ export default function App() {
     setSetupStep(null);
   };
 
-  const handleAddMacro = (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!newMacroName || !newMacroCmd) return;
-    setMacros([...macros, { name: newMacroName, command: newMacroCmd }]);
-    setNewMacroName('');
-    setNewMacroCmd('');
-    setShowMacroEditor(false);
-  };
-
-  const removeMacro = (index: number) => {
-    setMacros(macros.filter((_, i) => i !== index));
-  };
-  
   const handleQuickCmd = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === 'Enter' && quickCmd.trim() && activeConfig) {
-      setPendingMacro(quickCmd + '\\n');
       setQuickCmd('');
     }
   };
+
+  if (showHome) {
+    return <Home onStart={() => setShowHome(false)} />;
+  }
 
   return (
     <div className="flex flex-col h-screen w-full bg-[#1e1e1e] text-[#cccccc] font-sans select-none overflow-hidden">
@@ -208,7 +199,7 @@ export default function App() {
       </div>
 
       {/* Menu Bar */}
-      <div className="flex px-3 bg-[#252526] text-[11px] border-b border-[#3d3d3d] shrink-0 relative z-50">
+      <div className="flex px-3 bg-[#252526] text-[11px] border-b border-[#3d3d3d] shrink-0 relative z-50 overflow-x-auto [&::-webkit-scrollbar]:hidden">
         <div className="relative group" onMouseEnter={() => activeMenu && setActiveMenu('file')}>
            <div className={`px-2 py-1 cursor-pointer ${activeMenu === 'file' ? 'bg-[#444] text-white' : 'hover:bg-[#444]'}`} onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu === 'file' ? null : 'file'); }}>{t.file}</div>
            {activeMenu === 'file' && (
@@ -276,15 +267,6 @@ export default function App() {
            )}
         </div>
 
-        <div className="relative group" onMouseEnter={() => activeMenu && setActiveMenu('control')}>
-           <div className={`px-2 py-1 cursor-pointer ${activeMenu === 'control' ? 'bg-[#444] text-white' : 'hover:bg-[#444]'}`} onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu === 'control' ? null : 'control'); }}>{t.control}</div>
-           {activeMenu === 'control' && (
-             <div className="absolute top-full left-0 bg-[#252526] border border-[#3d3d3d] shadow-lg py-1 min-w-[170px] text-[#ccc]" onClick={e => e.stopPropagation()}>
-                <div className="px-5 py-1.5 hover:bg-[#4a9eff] hover:text-white cursor-pointer" onClick={() => { setShowMacroEditor(true); setActiveMenu(null); }}>{t.macro}</div>
-             </div>
-           )}
-        </div>
-
         <div className="relative group" onMouseEnter={() => activeMenu && setActiveMenu('window')}>
            <div className={`px-2 py-1 cursor-pointer ${activeMenu === 'window' ? 'bg-[#444] text-white' : 'hover:bg-[#444]'}`} onClick={(e) => { e.stopPropagation(); setActiveMenu(activeMenu === 'window' ? null : 'window'); }}>{t.window}</div>
            {activeMenu === 'window' && (
@@ -313,7 +295,7 @@ export default function App() {
       </div>
 
       {/* Toolbar */}
-      <div className="flex items-center gap-1 p-1 bg-[#2d2d2d] border-b border-[#3d3d3d] shrink-0">
+      <div className="flex items-center gap-1 p-1 bg-[#2d2d2d] border-b border-[#3d3d3d] shrink-0 overflow-x-auto [&::-webkit-scrollbar]:hidden">
         <button onClick={() => setSetupStep('new_conn')} className="px-2 py-1 hover:bg-[#444] rounded text-[10px] flex flex-col items-center gap-0.5">
           <span className="block text-xs leading-none">⚡</span>
           <span>Connect</span>
@@ -341,11 +323,6 @@ export default function App() {
           <span>SCP</span>
         </button>
         <div className="w-px h-6 bg-[#444] mx-1"></div>
-        <button className="px-2 py-1 hover:bg-[#444] rounded text-[10px] flex flex-col items-center gap-0.5" onClick={() => setShowMacroEditor(!showMacroEditor)}>
-          <span className="block text-xs leading-none">📜</span>
-          <span>Macro</span>
-        </button>
-        <div className="w-px h-6 bg-[#444] mx-1"></div>
         <div className="flex bg-[#1e1e1e] rounded border border-[#3d3d3d] mx-2 px-2 py-1 items-center gap-2">
           <span className="text-[9px] text-[#888]">SEND:</span>
           <input type="text" className="bg-transparent outline-none text-[10px] w-48 text-[#ccc] disabled:opacity-50" placeholder={activeConfig ? "Quick command..." : "Not connected"} value={quickCmd} onChange={e => setQuickCmd(e.target.value)} onKeyDown={handleQuickCmd} disabled={!activeConfig} />
@@ -353,43 +330,87 @@ export default function App() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex flex-1 overflow-hidden">
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative">
         
-        {/* Sidebar (Macros & Scripts) */}
-        <div className="w-56 bg-[#252526] border-r border-[#3d3d3d] flex flex-col shrink-0">
-          <div className="p-3 text-[10px] font-bold text-[#888] uppercase tracking-wider border-b border-[#3d3d3d] flex justify-between items-center">
-             <span>Available Macros</span>
-             <button onClick={() => setShowMacroEditor(true)} className="hover:text-white">+</button>
-          </div>
-          <div className="flex-1 overflow-y-auto p-2 space-y-1">
-            {macros.length === 0 && !showMacroEditor && (
-              <div className="text-[10px] text-[#666] italic p-2 text-center">No macros saved.</div>
-            )}
-            {macros.map((m, i) => (
-              <div key={i} className="p-2 bg-[#2d2d2d] rounded border border-[#3d3d3d] hover:border-[#4a9eff] cursor-pointer group flex items-start justify-between" onClick={() => activeConfig && setPendingMacro(m.command)}>
-                <div className="overflow-hidden">
-                  <div className="text-[11px] text-[#4a9eff] font-medium truncate">{m.name}</div>
-                  <div className="text-[9px] text-[#666] group-hover:text-[#888] truncate pr-2 mt-0.5 font-mono">{m.command}</div>
-                </div>
-                <button onClick={(e) => { e.stopPropagation(); removeMacro(i); }} className="text-[#666] hover:text-[#ff5f57] text-xs px-1" title="Delete">×</button>
-              </div>
-            ))}
-          </div>
-          
-          {showMacroEditor && (
-            <div className="p-3 border-t border-[#3d3d3d] bg-[#1e1e1e]">
-              <div className="mb-2">
-                <input type="text" placeholder="Macro Name" value={newMacroName} onChange={e=>setNewMacroName(e.target.value)} className="w-full bg-[#0c0c0c] text-[#ccc] border border-[#3d3d3d] rounded px-2 py-1 text-[10px] focus:outline-none focus:border-[#4a9eff] mb-2" />
-                <textarea placeholder="Command (use \n for newline)" value={newMacroCmd} onChange={e=>setNewMacroCmd(e.target.value)} className="w-full bg-[#0c0c0c] text-[#ccc] border border-[#3d3d3d] rounded px-2 py-1 text-[10px] focus:outline-none focus:border-[#4a9eff] h-16 resize-none font-mono"></textarea>
-              </div>
-              <div className="flex justify-end gap-2">
-                <button type="button" onClick={() => setShowMacroEditor(false)} className="text-[10px] text-[#888] hover:text-white">Cancel</button>
-                <button type="button" onClick={handleAddMacro} className="text-[10px] bg-[#4a9eff] hover:bg-[#3b82f6] text-white px-3 py-1 rounded font-medium">Save</button>
-              </div>
-            </div>
-          )}
+        {/* Toggle Mobile Sidebar Button */}
+        <div className="md:hidden bg-[#1e1e1e] p-2 flex items-center justify-between border-b border-[#3d3d3d] shrink-0 z-10 w-full">
+          <span className="text-[11px] text-[#4a9eff] font-bold truncate pr-2 flex-1">🎯 {tasks[currentTaskIndex]?.title}</span>
+          <button 
+            className="px-3 py-1.5 bg-[#2d2d2d] border border-[#3d3d3d] rounded text-[10px] text-[#ccc] whitespace-nowrap"
+            onClick={() => setShowTasksMobile(!showTasksMobile)}
+          >
+            {showTasksMobile ? 'ターミナルに戻る' : 'タスク一覧を開く'}
+          </button>
+        </div>
 
-          <div className="p-3 border-t border-[#3d3d3d] bg-[#1e1e1e]">
+        {/* Sidebar (Training Tasks) */}
+        <div className={`w-full md:w-80 bg-[#252526] md:border-r border-[#3d3d3d] flex-col shrink-0 md:relative z-20 flex-1 md:flex-initial ${showTasksMobile ? 'flex' : 'hidden md:flex'}`}>
+          <div className="p-3 text-[10px] font-bold text-[#888] uppercase tracking-wider border-b border-[#3d3d3d] flex justify-between items-center bg-[#1e1e1e]">
+             <span className="flex items-center gap-2"><span className="text-xl">🐧</span> トレーニングタスク</span>
+             <span className="text-[#4a9eff]">{currentTaskIndex + 1}/{tasks.length}</span>
+          </div>
+          <div className="flex-1 overflow-y-auto p-4 space-y-6">
+            {['初級', '中級', '上級', 'エキスパート'].map((level) => {
+               const levelTasks = tasks.filter(t => t.level === level);
+               if (levelTasks.length === 0) return null;
+               
+               return (
+                  <div key={level}>
+                    <h3 className="text-xs font-bold text-[#aaa] mb-3 pb-1 border-b border-[#444]">{level}編 ({levelTasks.length}問)</h3>
+                    <div className="space-y-4">
+                      {levelTasks.map((task) => {
+                        const i = tasks.findIndex(t => t.id === task.id);
+                        const isCurrent = i === currentTaskIndex;
+                        const isCompleted = completedTaskIds.has(task.id);
+                        
+                        return (
+                          <div key={task.id} id={`task-${task.id}`} onClick={() => setCurrentTaskIndex(i)} className={`cursor-pointer p-4 rounded border ${isCompleted ? 'bg-[#1e1e1e] border-[#3d3d3d] opacity-60' : isCurrent ? 'bg-[#2d2d2d] border-[#4a9eff] shadow-[0_0_10px_rgba(74,158,255,0.1)]' : 'bg-[#252526] border-[#3d3d3d]'} group flex flex-col gap-2 transition-colors`}>
+                            <div className="flex items-start justify-between gap-2">
+                              <div className={`text-[12px] font-bold ${isCompleted ? 'text-[#888]' : isCurrent ? 'text-[#4a9eff]' : 'text-[#666]'}`}>{task.title}</div>
+                              <div className={`w-4 h-4 rounded-full shrink-0 border flex items-center justify-center ${isCompleted ? 'bg-green-500 border-green-600 text-white text-[10px]' : isCurrent ? 'border-[#4a9eff] bg-[#1e1e1e]' : 'border-[#444] bg-[#1e1e1e]'} font-bold`}>{isCompleted ? '✓' : ''}</div>
+                            </div>
+                            
+                            {(isCurrent || !isCompleted) && (
+                               <div className="flex flex-col gap-2">
+                                 <div className={`text-[11px] leading-relaxed whitespace-pre-wrap ${isCurrent ? 'text-[#ccc]' : 'text-[#777]'}`}>{task.desc}</div>
+                                 {isCurrent && task.hint && (
+                                   <div className="mt-1 p-2 bg-[#1e293b] border border-[#334155] rounded text-[10px] text-[#94a3b8]">
+                                     <span className="font-bold text-[#38bdf8]">💡 ヒント: </span>
+                                     {task.hint}
+                                   </div>
+                                 )}
+                               </div>
+                            )}
+                            
+                            {isCurrent && isCompleted && (
+                               <div className="mt-3 p-3 bg-[#1e1e1e] border border-green-500/50 rounded flex flex-col gap-3">
+                                  <div className="text-[11px] text-green-400 font-medium">{task.completedMsg}</div>
+                                  <button onClick={() => { 
+                                     setCurrentTaskIndex(c => Math.min(c + 1, tasks.length - 1)); 
+                                     if(showTasksMobile) setShowTasksMobile(false);
+                                     setTimeout(() => document.getElementById(`task-${tasks[Math.min(currentTaskIndex + 1, tasks.length - 1)]?.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+                                  }} className="w-full bg-[#4a9eff] hover:bg-[#3b82f6] text-white text-[10px] uppercase font-bold tracking-wider py-1.5 rounded transition-colors">
+                                    次のステップへ ➔
+                                  </button>
+                               </div>
+                            )}
+                          </div>
+                        )
+                      })}
+                    </div>
+                  </div>
+               )
+            })}
+            {currentTaskIndex >= tasks.length && (
+              <div className="p-4 bg-[#2d2d2d] border border-green-500 rounded text-center my-8">
+                 <div className="text-4xl mb-2">🎉</div>
+                 <div className="text-[#ccc] text-sm font-bold mb-1">トレーニング完了！</div>
+                 <div className="text-xs text-[#888]">全問クリアしました！あなたも立派なペンギン使いです。</div>
+              </div>
+            )}
+          </div>
+
+          <div className="p-3 border-t border-[#3d3d3d] bg-[#1e1e1e] shrink-0">
             <div className="text-[9px] text-[#666] mb-2 font-bold tracking-wider">QUICK STATS</div>
             <div className="flex justify-between text-[10px]">
               <span>RX: {activeConfig ? '2.4 MB' : '0 B'}</span>
@@ -403,26 +424,29 @@ export default function App() {
         </div>
 
         {/* Terminal Pane / Setup Dialog */}
-        <div className="flex-1 flex flex-col bg-[#0c0c0c] relative">
+        <div className={`flex-1 flex-col bg-[#0c0c0c] relative ${!showTasksMobile ? 'flex' : 'hidden md:flex'}`}>
           {setupStep !== null ? (
-            <div className="absolute inset-0 bg-[#1e1e1e] flex items-center justify-center p-8 z-10 text-[#ccc]">
+            <div className="absolute inset-0 bg-[#1e1e1e] flex items-center justify-center p-2 sm:p-4 md:p-8 z-10 text-[#ccc] overflow-hidden">
               {/* Common Dialog Header */}
               {setupStep === 'new_conn' && (
-                <form className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch" onSubmit={(e) => { e.preventDefault(); if(connType==='tcpip' && tcpService==='ssh') setSetupStep('security_warning'); else { handleConnect(e); } }}>
-                  <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
+                <form className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch max-h-full overflow-y-auto" onSubmit={(e) => { e.preventDefault(); if(connType==='tcpip' && tcpService==='ssh') setSetupStep('security_warning'); else { handleConnect(e); } }}>
+                  <div className="bg-[#2d2d2d] px-4 py-2 sm:py-3 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center sticky top-0 z-10">
                     <span>New connection</span>
-                    <button type="button" onClick={() => setSetupStep(null)} className="text-[#888] hover:text-white text-sm leading-none">✕</button>
+                    <button type="button" onClick={() => setSetupStep(null)} className="text-[#888] hover:text-white text-base leading-none p-1">✕</button>
                   </div>
-                  <div className="p-6 flex flex-col gap-6">
+                  <div className="p-4 sm:p-6 flex flex-col gap-6">
                     {/* TCP/IP Section */}
-                    <div className="flex items-start gap-4">
-                       <input type="radio" id="tcpip" checked={connType === 'tcpip'} onChange={() => setConnType('tcpip')} className="mt-1 accent-[#4a9eff]" />
-                       <div className="flex flex-col gap-4 flex-1">
-                          <label htmlFor="tcpip" className="font-bold text-xs mt-0.5 cursor-pointer">TCP/IP</label>
-                          <div className="ml-2 flex items-center gap-4">
-                             <span className="w-16 text-right text-xs text-[#888]">Host:</span>
+                    <div className="flex flex-col sm:flex-row items-start gap-2 sm:gap-4">
+                       <div className="flex items-center gap-2 mt-1">
+                         <input type="radio" id="tcpip" checked={connType === 'tcpip'} onChange={() => setConnType('tcpip')} className="accent-[#4a9eff]" />
+                         <label htmlFor="tcpip" className="font-bold text-xs cursor-pointer sm:hidden">TCP/IP</label>
+                       </div>
+                       <div className="flex flex-col gap-4 flex-1 w-full">
+                          <label htmlFor="tcpip" className="font-bold text-xs mt-0.5 cursor-pointer hidden sm:block">TCP/IP</label>
+                          <div className="sm:ml-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+                             <span className="sm:w-16 sm:text-right text-xs text-[#888] mb-1 sm:mb-0">Host:</span>
                              <div className="relative flex-1">
-                               <input type="text" list="historyHosts" value={sshHost} onChange={e => setSshHost(e.target.value)} className="w-full bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" required={connType==='tcpip'} disabled={connType!=='tcpip'} />
+                               <input type="text" list="historyHosts" value={sshHost} onChange={e => setSshHost(e.target.value)} className="w-full bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-2 sm:py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" required={connType==='tcpip'} disabled={connType!=='tcpip'} />
                                <datalist id="historyHosts">
                                   <option value="192.168.1.1" />
                                   <option value="localhost" />
@@ -430,23 +454,23 @@ export default function App() {
                              </div>
                           </div>
                           
-                          <div className="ml-2 flex items-center gap-4">
-                             <span className="w-16 text-right text-xs text-[#888]">Service:</span>
-                             <div className="flex gap-4">
+                          <div className="sm:ml-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+                             <span className="sm:w-16 sm:text-right text-xs text-[#888] mb-1 sm:mb-0">Service:</span>
+                             <div className="flex flex-wrap gap-4">
                                 <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={tcpService === 'telnet'} onChange={()=>setTcpService('telnet')} disabled={connType!=='tcpip'} className="accent-[#4a9eff]" /> Telnet</label>
                                 <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={tcpService === 'ssh'} onChange={()=>setTcpService('ssh')} disabled={connType!=='tcpip'} className="accent-[#4a9eff]" /> SSH</label>
                                 <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={tcpService === 'other'} onChange={()=>setTcpService('other')} disabled={connType!=='tcpip'} className="accent-[#4a9eff]" /> Other</label>
                              </div>
                           </div>
                           
-                          <div className="ml-2 flex items-center gap-4">
-                             <span className="w-16 text-right text-xs text-[#888]">TCP port#:</span>
-                             <input type="number" value={sshPort} onChange={e => setSshPort(e.target.value)} className="w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" disabled={connType!=='tcpip'} />
+                          <div className="sm:ml-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-2 sm:mt-0">
+                             <span className="sm:w-16 sm:text-right text-xs text-[#888]">TCP port#:</span>
+                             <input type="number" value={sshPort} onChange={e => setSshPort(e.target.value)} className="w-full sm:w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-2 sm:py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" disabled={connType!=='tcpip'} />
                              
                              {tcpService === 'ssh' && (
-                                <div className="ml-4 flex items-center gap-3">
-                                   <span className="text-right text-xs text-[#888]">SSH version:</span>
-                                   <select className="w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff] disabled:opacity-50" disabled={true}><option>SSH2</option></select>
+                                <div className="mt-2 sm:mt-0 sm:ml-4 flex items-center justify-between sm:justify-start gap-3">
+                                   <span className="text-xs text-[#888]">SSH version:</span>
+                                   <select className="flex-1 sm:w-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-2 sm:py-1.5 text-xs focus:outline-none focus:border-[#4a9eff] disabled:opacity-50" disabled={true}><option>SSH2</option></select>
                                 </div>
                              )}
                           </div>
@@ -454,21 +478,24 @@ export default function App() {
                     </div>
                     
                     {/* Serial Section */}
-                    <div className="flex items-start gap-4 pt-6 border-t border-[#3d3d3d]">
-                       <input type="radio" id="serial" checked={connType === 'serial'} onChange={() => setConnType('serial')} className="mt-1 accent-[#4a9eff]" />
-                       <div className="flex flex-col gap-4 flex-1">
-                          <label htmlFor="serial" className="font-bold text-xs mt-0.5 cursor-pointer">Serial</label>
-                          <div className="ml-2 flex items-center gap-4">
-                             <span className="w-16 text-right text-xs text-[#888]">Port:</span>
-                             <select className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff] disabled:opacity-50" disabled={connType!=='serial'}>
+                    <div className="flex flex-col sm:flex-row items-start gap-2 sm:gap-4 pt-6 border-t border-[#3d3d3d]">
+                       <div className="flex items-center gap-2 mt-1">
+                         <input type="radio" id="serial" checked={connType === 'serial'} onChange={() => setConnType('serial')} className="accent-[#4a9eff]" />
+                         <label htmlFor="serial" className="font-bold text-xs cursor-pointer sm:hidden">Serial</label>
+                       </div>
+                       <div className="flex flex-col gap-4 flex-1 w-full">
+                          <label htmlFor="serial" className="font-bold text-xs mt-0.5 cursor-pointer hidden sm:block">Serial</label>
+                          <div className="sm:ml-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4">
+                             <span className="sm:w-16 sm:text-right text-xs text-[#888] mb-1 sm:mb-0">Port:</span>
+                             <select className="flex-1 w-full bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-2 sm:py-1.5 text-xs focus:outline-none focus:border-[#4a9eff] disabled:opacity-50" disabled={connType!=='serial'}>
                                <option>COM1: USB Serial Port</option>
                                <option>COM2: Bluetooth</option>
                              </select>
                           </div>
                           {connType === 'serial' && (
-                             <div className="ml-2 flex items-center gap-4">
-                                <span className="w-16 text-right text-xs text-[#888]">Baud Rate:</span>
-                                <select value={serialBaud} onChange={e => setSerialBaud(e.target.value)} className="w-32 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]">
+                             <div className="sm:ml-2 flex flex-col sm:flex-row sm:items-center gap-1 sm:gap-4 mt-2 sm:mt-0">
+                                <span className="sm:w-16 sm:text-right text-xs text-[#888]">Baud Rate:</span>
+                                <select value={serialBaud} onChange={e => setSerialBaud(e.target.value)} className="w-full sm:w-32 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-2 sm:py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]">
                                   <option value="9600">9600</option>
                                   <option value="115200">115200</option>
                                 </select>
@@ -478,68 +505,68 @@ export default function App() {
                     </div>
                   </div>
                   
-                  <div className="p-4 border-t border-[#3d3d3d] bg-[#2d2d2d] flex justify-end gap-3 rounded-b">
-                     <button type="button" onClick={() => setSetupStep(null)} className="px-4 py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors">Cancel</button>
-                     <button type="submit" className="px-6 py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors">OK</button>
+                  <div className="p-4 border-t border-[#3d3d3d] bg-[#2d2d2d] flex flex-col sm:flex-row justify-end gap-3 rounded-b sticky bottom-0 z-10">
+                     <button type="button" onClick={() => setSetupStep(null)} className="px-4 py-2 sm:py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors w-full sm:w-auto mt-2 sm:mt-0">Cancel</button>
+                     <button type="submit" className="px-6 py-2 sm:py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors w-full sm:w-auto mt-2 sm:mt-0">OK</button>
                   </div>
                 </form>
               )}
               
               {setupStep === 'security_warning' && (
-                <div className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch">
-                  <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
+                <div className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch max-h-[90vh] overflow-y-auto">
+                  <div className="bg-[#2d2d2d] px-4 py-2 sm:py-3 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center sticky top-0 z-10">
                     <span className="text-[#ff9800]">SECURITY WARNING</span>
-                    <button type="button" onClick={() => setSetupStep('new_conn')} className="text-[#888] hover:text-white text-sm leading-none">✕</button>
+                    <button type="button" onClick={() => setSetupStep('new_conn')} className="text-[#888] hover:text-white text-base leading-none">✕</button>
                   </div>
-                  <div className="p-6 pb-4 text-xs">
+                  <div className="p-4 sm:p-6 pb-4 sm:pb-4 text-xs">
                      <div className="flex items-center gap-3 text-[#ff9800] font-bold mb-4">
                         <span className="text-xl">⚠️</span>
-                        <span>WARNING: SECURITY OF THIS HOST IS NOT GIVEN</span>
+                        <span className="leading-tight">WARNING: SECURITY OF THIS HOST IS NOT GIVEN</span>
                      </div>
                      <p className="leading-relaxed text-[#ccc]">
                        Connecting to this host is not recommended unless you are absolutely sure of its identity. Are you sure you want to proceed and connect?
                      </p>
                   </div>
-                  <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex justify-end gap-3 rounded-b">
-                     <button type="button" onClick={() => setSetupStep('new_conn')} className="px-4 py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors">Cancel</button>
-                     <button type="button" onClick={() => setSetupStep('ssh_auth')} className="px-6 py-1.5 text-xs bg-[#ff9800] hover:bg-[#f57c00] text-white rounded font-medium transition-colors">Continue</button>
+                  <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex flex-col sm:flex-row justify-end gap-3 rounded-b sticky bottom-0 z-10">
+                     <button type="button" onClick={() => setSetupStep('new_conn')} className="px-4 py-2 sm:py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors w-full sm:w-auto">Cancel</button>
+                     <button type="button" onClick={() => setSetupStep('ssh_auth')} className="px-6 py-2 sm:py-1.5 text-xs bg-[#ff9800] hover:bg-[#f57c00] text-white rounded font-medium transition-colors w-full sm:w-auto">Continue</button>
                   </div>
                 </div>
               )}
 
               {setupStep === 'ssh_auth' && (
-                <form className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch" onSubmit={(e) => { e.preventDefault(); handleConnect(e); }}>
-                  <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
+                <form className="w-full max-w-md bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch max-h-[90vh] overflow-y-auto" onSubmit={(e) => { e.preventDefault(); handleConnect(e); }}>
+                  <div className="bg-[#2d2d2d] px-4 py-2 sm:py-3 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center sticky top-0 z-10">
                     <span>SSH Authentication</span>
-                    <button type="button" onClick={() => setSetupStep('new_conn')} className="text-[#888] hover:text-white text-sm leading-none">✕</button>
+                    <button type="button" onClick={() => setSetupStep('new_conn')} className="text-[#888] hover:text-white text-base leading-none">✕</button>
                   </div>
-                  <div className="p-6 flex flex-col gap-4">
+                  <div className="p-4 sm:p-6 flex flex-col gap-4">
                      <div className="text-xs mb-2 font-bold text-[#4a9eff]">
                         Authentication required.
                      </div>
-                     <div className="flex gap-4 items-center">
-                        <span className="w-24 text-right text-xs text-[#888]">User name:</span>
-                        <input type="text" value={sshUser} onChange={e=>setSshUser(e.target.value)} className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" required />
+                     <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 sm:items-center">
+                        <span className="sm:w-24 sm:text-right text-xs text-[#888]">User name:</span>
+                        <input type="text" value={sshUser} onChange={e=>setSshUser(e.target.value)} className="w-full flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-2 sm:py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" required />
                      </div>
-                     <div className="flex gap-4 items-center">
-                        <span className="w-24 text-right text-xs text-[#888]">Passphrase:</span>
-                        <input type="password" value={sshPass} onChange={e=>setSshPass(e.target.value)} className="flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" />
+                     <div className="flex flex-col sm:flex-row gap-2 sm:gap-4 sm:items-center">
+                        <span className="sm:w-24 sm:text-right text-xs text-[#888]">Password:</span>
+                        <input type="password" value={sshPass} onChange={e=>setSshPass(e.target.value)} className="w-full flex-1 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-2 sm:py-1.5 text-xs focus:outline-none focus:border-[#4a9eff]" />
                      </div>
                      
-                     <div className="flex gap-4 items-start mt-2">
-                        <span className="w-24 text-right text-xs text-[#888]">Methods:</span>
-                        <div className="flex-1 space-y-3">
-                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={authMethod==='password'} onChange={()=>setAuthMethod('password')} className="accent-[#4a9eff]" /> Plain password in memory</label>
-                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={authMethod==='key'} onChange={()=>setAuthMethod('key')} className="accent-[#4a9eff]" /> RSA/DSA/ECDSA/ED25519 key</label>
+                     <div className="flex flex-col sm:flex-row items-start gap-2 sm:gap-4 mt-2">
+                        <span className="sm:w-24 sm:text-right text-xs text-[#888]">Methods:</span>
+                        <div className="flex-1 space-y-3 w-full">
+                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={authMethod==='password'} onChange={()=>setAuthMethod('password')} className="accent-[#4a9eff]" /> Plain password</label>
+                            <label className="flex items-center gap-2 text-xs cursor-pointer"><input type="radio" checked={authMethod==='key'} onChange={()=>setAuthMethod('key')} className="accent-[#4a9eff]" /> RSA/DSA/ECDSA/ED25519</label>
                             {authMethod === 'key' && (
                                <textarea value={sshKey} onChange={e=>setSshKey(e.target.value)} placeholder="-----BEGIN PRIVATE KEY-----" className="mt-2 w-full h-24 bg-[#1e1e1e] border border-[#3d3d3d] rounded px-3 py-2 text-[10px] font-mono resize-none focus:outline-none focus:border-[#4a9eff]" required />
                             )}
                         </div>
                      </div>
                   </div>
-                  <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex justify-end gap-3 rounded-b">
-                     <button type="button" onClick={() => setSetupStep('new_conn')} className="px-4 py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors">Cancel</button>
-                     <button type="submit" className="px-6 py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors">OK</button>
+                  <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex flex-col sm:flex-row justify-end gap-3 rounded-b sticky bottom-0 z-10">
+                     <button type="button" onClick={() => setSetupStep('new_conn')} className="px-4 py-2 sm:py-1.5 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors w-full sm:w-auto">Cancel</button>
+                     <button type="submit" className="px-6 py-2 sm:py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors w-full sm:w-auto">OK</button>
                   </div>
                 </form>
               )}
@@ -640,14 +667,14 @@ export default function App() {
 
           <TerminalSimulator 
                config={activeConfig} 
+               currentTask={tasks[currentTaskIndex]}
                onDisconnect={() => { 
                  if ((autoLog || isLogging) && sessionLogRef.current) downloadSessionLog();
                  setActiveConfig(null); 
                  setSetupStep('new_conn'); 
                  setIsLogging(false);
                }} 
-               pendingMacro={pendingMacro}
-               onMacroExecuted={() => setPendingMacro(null)}
+               onCommandExecuted={handleCommandExecuted}
                pendingPaste={pendingPaste}
                onPasteExecuted={() => setPendingPaste(null)}
                pasteDelay={{ char: delayChar, line: delayLine }}
