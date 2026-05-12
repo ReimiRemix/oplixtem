@@ -178,7 +178,7 @@ export default function App() {
   }
 
   return (
-    <div className="flex flex-col h-screen w-full bg-[#1e1e1e] text-[#cccccc] font-sans select-none overflow-hidden">
+    <div className="flex flex-col h-[100dvh] w-full bg-[#1e1e1e] text-[#cccccc] font-sans overflow-hidden">
       {/* Title Bar */}
       <div className="flex items-center justify-between bg-[#2d2d2d] px-3 py-1 border-b border-[#3d3d3d] shrink-0">
         <div className="flex items-center gap-2">
@@ -339,7 +339,7 @@ export default function App() {
       </div>
 
       {/* Main Content Area */}
-      <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative">
+      <div className="flex flex-col md:flex-row flex-1 overflow-hidden relative min-h-0">
         
         {/* Toggle Mobile Sidebar Button */}
         <div className="md:hidden bg-[#1e1e1e] p-2 flex items-center justify-between border-b border-[#3d3d3d] shrink-0 z-10 w-full">
@@ -353,12 +353,12 @@ export default function App() {
         </div>
 
         {/* Sidebar (Training Tasks) */}
-        <div className={`w-full md:w-80 bg-[#252526] md:border-r border-[#3d3d3d] flex-col shrink-0 md:relative z-20 flex-1 md:flex-initial ${showTasksMobile ? 'flex' : 'hidden md:flex'}`}>
+        <div className={`w-full md:w-80 bg-[#252526] md:border-r border-[#3d3d3d] flex-col shrink-0 md:relative z-20 flex-1 md:flex-initial min-h-0 ${showTasksMobile ? 'flex' : 'hidden md:flex'}`}>
           <div className="p-3 text-[10px] font-bold text-[#888] uppercase tracking-wider border-b border-[#3d3d3d] flex justify-between items-center bg-[#1e1e1e]">
              <span className="flex items-center gap-2"><span className="text-xl">🐧</span> トレーニングタスク</span>
              <span className="text-[#4a9eff]">{currentTaskIndex + 1}/{tasks.length}</span>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          <div className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
             {['初級', '中級', '上級', 'エキスパート'].map((level) => {
                const levelTasks = tasks.filter(t => t.level === level);
                if (levelTasks.length === 0) return null;
