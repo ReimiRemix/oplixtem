@@ -13,7 +13,7 @@ export default function Home({ onStart }: HomeProps) {
         <div className="max-w-6xl mx-auto px-6 h-16 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <span className="text-2xl">🐧</span>
-            <span className="font-bold text-lg tracking-wide">Penguin Gym Linux</span>
+            <span className="font-bold text-lg tracking-wide">WEB Oplix Terminal Simulator</span>
           </div>
           <button 
             onClick={onStart}
@@ -141,7 +141,7 @@ export default function Home({ onStart }: HomeProps) {
       {/* Footer */}
       <footer className="border-t border-[#2a2a30] pt-8 pb-12 mt-10">
         <div className="max-w-6xl mx-auto px-6 text-center text-[#666670] text-sm">
-          <p>© {new Date().getFullYear()} Penguin Gym Linux Clone. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} WEB Oplix Terminal Simulator. All rights reserved.</p>
         </div>
       </footer>
     </div>

@@ -119,7 +119,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
         term.writeln(`\r\n\x1b[36m[SFTP] Starting upload for ${file.name} (${Math.round(file.size/1024)} KB)...\x1b[0m`);
         setTimeout(() => {
            term.writeln(`\x1b[32m[SFTP] Upload complete: ${file.name}\x1b[0m\r\n`);
-           term.write('\x1b[35mpenguin@training\x1b[0m:\x1b[34m~\x1b[0m$ ');
+           term.write('\x1b[35mOpkix@Terminal\x1b[0m:\x1b[34m~\x1b[0m$ ');
         }, 500);
       }
     };
@@ -174,7 +174,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
                 term?.writeln(`\r\n\x1b[36m[SFTP] Starting upload for ${file.name} (${Math.round(file.size/1024)} KB)...\x1b[0m`);
                 await new Promise(res => setTimeout(res, 500));
                 term?.writeln(`\x1b[32m[SFTP] Upload complete: ${file.name}\x1b[0m\r\n`);
-                term?.write('\x1b[35mpenguin@training\x1b[0m:\x1b[34m~\x1b[0m$ ');
+                term?.write('\x1b[35mOplix@Terminal\x1b[0m:\x1b[34m~\x1b[0m$ ');
             }
             if (onUploadExecuted) onUploadExecuted();
         }
