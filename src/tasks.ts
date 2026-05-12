@@ -77,7 +77,7 @@ export const generateTrainingTasks = (sshHost: string, sshUser: string, sshPort:
       if (config && config.type === 'ssh') {
         if (config.host === sshHost && config.username === sshUser && config.password === initialSshPass && (config.port?.toString() || '22') === sshPort.toString()) return { valid: true };
       }
-      return c.trim().replace(/\s+/g, ' ') === `ssh ${sshPort!=='22' ? '-p '+sshPort+' ' : ''}${sshUser}@${sshHost}`;
+      return { valid: c.trim().replace(/\s+/g, ' ') === `ssh ${sshPort!=='22' ? '-p '+sshPort+' ' : ''}${sshUser}@${sshHost}` };
     }, completedMsg: 'ログインに成功しました！', hint: 'ssh user@host の形式です。' },
     { id: 'b2', level: '初級', title: '現在位置の確認', desc: '現在の作業ディレクトリパスを表示してください。', expectedCmd: 'pwd', validator: (c) => c.trim() === 'pwd', completedMsg: '正解です！', hint: 'Print Working Directory' },
     { id: 'b3', level: '初級', title: 'ファイルの一覧表示', desc: '現在のディレクトリ内のファイルを表示してください。', expectedCmd: 'ls', validator: (c) => /^ls(\s+)?$/.test(c.trim()), completedMsg: '表示できました。', hint: 'LiSt' },
@@ -182,6 +182,28 @@ export const generateTrainingTasks = (sshHost: string, sshUser: string, sshPort:
     { id: 'a38', level: '上級', title: 'ディレクトリのみ', desc: 'ディレクトリだけを表示するように ls を実行してください。', expectedCmd: 'ls -d */', validator: (c) => /ls\s+-d/.test(c.trim()), completedMsg: '箱だけ。', hint: 'ls -d' },
     { id: 'a39', level: '上級', title: '重複なし結合', desc: '2つのファイルを合体させ、重複行を消して表示してください。', expectedCmd: 'cat f1 f2 | sort | uniq', validator: (c) => /cat\s+.*\s*\|\s*sort\s*\|\s*uniq/.test(c.trim()), completedMsg: '融合。', hint: 'cat sort uniq' },
     { id: 'a40', level: '上級', title: '全ルート', desc: 'rootユーザー（管理者）に切り替えてください。', expectedCmd: 'sudo su -', validator: (c) => /sudo\s+(su|sh|bash)/.test(c.trim()), completedMsg: '万能感。', hint: 'sudo su' },
+
+    // --- エキスパート (20 tasks) ---
+    { id: 'e1', level: 'エキスパート', title: 'プロセスツリー', desc: 'プロセスを親子関係のツリー状で表示してください。', expectedCmd: 'ps auxf', validator: (c) => /ps\s+.*f/.test(c.trim()), completedMsg: '家系図。', hint: 'ps auxf' },
+    { id: 'e2', level: 'エキスパート', title: '一括置換', desc: '現在のフォルダの全 .txt ファイル内の "old" を "new" に一括置換してください。', expectedCmd: "sed -i 's/old/new/g' *.txt", validator: (c) => /sed\s+-i/.test(c.trim()), completedMsg: '一網打尽。', hint: 'sed -i' },
+    { id: 'e3', level: 'エキスパート', title: '容量ワースト', desc: 'ファイルサイズが大きい順にトップ5を表示してください。', expectedCmd: 'ls -lS | head -n 6', validator: (c) => /ls\s+.*S/.test(c.trim()), completedMsg: 'メタボ発見。', hint: 'ls -S' },
+    { id: 'e4', level: 'エキスパート', title: '複雑な抽出', desc: '/etc/passwd からユーザー名だけを抽出して表示してください。', expectedCmd: "cut -d: -f1 /etc/passwd", validator: (c) => /cut\s+-d:/.test(c.trim()), completedMsg: '名簿作成。', hint: 'cut -d: -f1' },
+    { id: 'e5', level: 'エキスパート', title: 'バックグラウンド再開', desc: 'バックグラウンドで停止しているジョブを、裏側のまま実行再開させてください。', expectedCmd: 'bg %1', validator: (c) => /bg\s+(%1|1)/.test(c.trim()), completedMsg: '裏仕事再開。', hint: 'bg' },
+    { id: 'e6', level: 'エキスパート', title: 'ディスク監視', desc: 'ディスクI/Oの状況をリアルタイムで監視してください。', expectedCmd: 'iostat -x 1', validator: (c) => /iostat/.test(c.trim()), completedMsg: '心拍確認。', hint: 'iostat' },
+    { id: 'e7', level: 'エキスパート', title: 'ネットワーク監視', desc: 'ネットワークインターフェースの統計情報をリアルタイムで表示してください。', expectedCmd: 'sar -n DEV 1', validator: (c) => /sar/.test(c.trim()), completedMsg: 'トラフィック。', hint: 'sar' },
+    { id: 'e8', level: 'エキスパート', title: 'ゾンビプロセス', desc: 'システム内のゾンビプロセスを検索してください。', expectedCmd: "ps aux | grep 'Z'", validator: (c) => /ps\s+.*grep\s+['"]Z['"]/.test(c.trim()), completedMsg: '成仏。', hint: 'grep Z' },
+    { id: 'e9', level: 'エキスパート', title: 'ファイル監視', desc: 'log.txt に追記される内容をリアルタイムで表示し続けてください。', expectedCmd: 'tail -f log.txt', validator: (c) => /tail\s+-f/.test(c.trim()), completedMsg: 'ログ監視員。', hint: 'tail -f' },
+    { id: 'e10', level: 'エキスパート', title: 'ポートスキャン', desc: '自ホストのオープンしているTCPポートをスキャンしてください。', expectedCmd: 'nmap localhost', validator: (c) => /nmap/.test(c.trim()), completedMsg: 'セキュリティ診断。', hint: 'nmap' },
+    { id: 'e11', level: 'エキスパート', title: 'ルート追跡', desc: 'google.com までのネットワーク経路を表示してください。', expectedCmd: 'traceroute google.com', validator: (c) => /traceroute/.test(c.trim()), completedMsg: '旅路。', hint: 'traceroute' },
+    { id: 'e12', level: 'エキスパート', title: '巨大ファイル作成', desc: '1GBのダミーファイルを高速に作成してください。', expectedCmd: 'fallocate -l 1G large.file', validator: (c) => /fallocate/.test(c.trim()), completedMsg: '領域確保。', hint: 'fallocate' },
+    { id: 'e13', level: 'エキスパート', title: 'バイナリ読込', desc: '実行ファイルの文字列（strings）を抽出して表示してください。', expectedCmd: 'strings /bin/ls', validator: (c) => /strings/.test(c.trim()), completedMsg: '解読。', hint: 'strings' },
+    { id: 'e14', level: 'エキスパート', title: 'ファイルシステム', desc: '現在マウントされている全ファイルシステムのタイプ（ext4等）を表示してください。', expectedCmd: 'df -T', validator: (c) => /df\s+-T/.test(c.trim()), completedMsg: '形式確認。', hint: 'df -T' },
+    { id: 'e15', level: 'エキスパート', title: 'シェル変更', desc: '自分のログインシェルを /bin/zsh に変更するコマンドは？', expectedCmd: 'chsh -s /bin/zsh', validator: (c) => /chsh/.test(c.trim()), completedMsg: '殻破り。', hint: 'chsh' },
+    { id: 'e16', level: 'エキスパート', title: '時刻同期', desc: 'NTPサーバーから正確な時刻を取得し同期させてください。', expectedCmd: 'ntpdate pool.ntp.org', validator: (c) => /ntpdate/.test(c.trim()), completedMsg: '同期完了。', hint: 'ntpdate' },
+    { id: 'e17', level: 'エキスパート', title: 'パケットキャプチャ', desc: 'ネットワークパケットのヘッダを表示してください。', expectedCmd: 'tcpdump -i eth0', validator: (c) => /tcpdump/.test(c.trim()), completedMsg: '盗聴中（合法）。', hint: 'tcpdump' },
+    { id: 'e18', level: 'エキスパート', title: 'スクリプト実行', desc: 'カレントディレクトリの script.sh を現在のシェルで読み込んで実行してください。', expectedCmd: 'source ./script.sh', validator: (c) => /^(source|\.)\s+\.\/script\.sh/.test(c.trim()), completedMsg: '反映。', hint: 'source' },
+    { id: 'e19', level: 'エキスパート', title: 'ファイル数制限', desc: '現在のシェルの最大オープンファイル数（ulimit）を確認してください。', expectedCmd: 'ulimit -n', validator: (c) => /ulimit\s+-n/.test(c.trim()), completedMsg: '限界確認。', hint: 'ulimit -n' },
+    { id: 'e20', level: 'エキスパート', title: 'システムコール', desc: 'lsコマンドが発行するシステムコールを追跡してください。', expectedCmd: 'strace ls', validator: (c) => /strace/.test(c.trim()), completedMsg: '内部告発。', hint: 'strace' },
   ];
 
   return tasks.map(t => ({ ...t, validator: t.validator || ((c: string) => aiValidator(t, c)) }));

@@ -95,6 +95,15 @@ export default function App() {
   const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
   const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(new Set());
   
+  useEffect(() => {
+    const task = tasks[currentTaskIndex];
+    if (task) {
+      setTimeout(() => {
+        document.getElementById(`task-${task.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 50);
+    }
+  }, [currentTaskIndex, tasks]);
+
   // App State
   const [timeStr, setTimeStr] = useState('');
   const [quickCmd, setQuickCmd] = useState('');
@@ -385,10 +394,10 @@ export default function App() {
                             {isCurrent && isCompleted && (
                                <div className="mt-3 p-3 bg-[#1e1e1e] border border-green-500/50 rounded flex flex-col gap-3">
                                   <div className="text-[11px] text-green-400 font-medium">{task.completedMsg}</div>
-                                  <button onClick={() => { 
+                                  <button onClick={(e) => { 
+                                     e.stopPropagation();
                                      setCurrentTaskIndex(c => Math.min(c + 1, tasks.length - 1)); 
                                      if(showTasksMobile) setShowTasksMobile(false);
-                                     setTimeout(() => document.getElementById(`task-${tasks[Math.min(currentTaskIndex + 1, tasks.length - 1)]?.id}`)?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
                                   }} className="w-full bg-[#4a9eff] hover:bg-[#3b82f6] text-white text-[10px] uppercase font-bold tracking-wider py-1.5 rounded transition-colors">
                                     次のステップへ ➔
                                   </button>

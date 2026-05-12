@@ -114,6 +114,11 @@ export class VirtualFileSystem {
     
     if (parent.children[fileName]) {
       parent.children[fileName].updatedAt = new Date();
+      // If content is provided and we want to allow touch to set it (simplified for this mock)
+      if (content) {
+         parent.children[fileName].content = content;
+         parent.children[fileName].size = content.length;
+      }
       return true;
     }
     
@@ -128,6 +133,15 @@ export class VirtualFileSystem {
       updatedAt: new Date(),
     };
     return true;
+  }
+
+  writeFile(path: string, content: string): boolean {
+    return this.touch(path, content);
+  }
+
+  appendFile(path: string, content: string): boolean {
+    const existing = this.readFile(path) || '';
+    return this.touch(path, existing + (existing && !existing.endsWith('\n') ? '\n' : '') + content);
   }
 
   readFile(path: string): string | null {

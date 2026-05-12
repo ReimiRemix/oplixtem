@@ -294,18 +294,21 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
              const activeTask = currentTaskRef.current;
              
              // Run the simulation in Virtual Shell
+             let shellOutput = '';
              if (cmd === 'clear') {
                  term.clear();
              } else {
-                 const output = shellRef.current.execute(cmd);
-                 if (output) {
-                     output.split('\n').forEach(line => term.writeln(line));
+                 shellOutput = shellRef.current.execute(cmd);
+                 if (shellOutput) {
+                     shellOutput.split('\n').forEach(line => term.writeln(line));
                  }
              }
 
              // Validation logic silently running
              if (activeTask) {
-                 if (activeTask.validator) {
+                 if (shellOutput.includes('command not found')) {
+                     isValid = false;
+                 } else if (activeTask.validator) {
                     const res = await activeTask.validator(norm, config || undefined);
                     // Provide the VFS state to validator if needed later, but standard checking first:
                     if (typeof res === 'object' && res !== null) {
@@ -359,7 +362,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
            term.clear();
            term.write(`\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${currentLine}`);
         } else if (char === '\t') { // Tab
-           const commands = ['pwd', 'cd', 'ls', 'cat', 'touch', 'mkdir', 'cp', 'mv', 'rm', 'rmdir', 'echo', 'clear', 'date', 'cal', 'man', 'ssh'];
+           const commands = ['pwd', 'cd', 'ls', 'cat', 'touch', 'mkdir', 'cp', 'mv', 'rm', 'rmdir', 'chmod', 'chown', 'grep', 'ps', 'top', 'whoami', 'uname', 'hostname', 'id', 'who', 'w', 'df', 'free', 'echo', 'uptime', 'history', 'clear', 'date', 'cal', 'man', 'ssh', 'sudo', 'systemctl', 'ip', 'dig', 'tar', 'sed', 'awk', 'tr', 'find', 'which', 'alias', 'bg', 'fg', 'jobs', 'kill', 'ping', 'curl', 'env', 'passwd', 'read', 'lsattr', 'chattr', 'split', 'dmesg', 'mount', 'strings', 'nmap', 'traceroute', 'tcpdump', 'strace', 'ulimit', 'chsh', 'ntpdate', 'iostat', 'sar', 'fallocate'];
            
            const parts = currentLine.split(' ');
            if (parts.length === 1) { // Command completion
