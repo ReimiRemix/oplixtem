@@ -8,7 +8,7 @@ import { VirtualFileSystem } from './filesystem';
 import { ShellEnvironment } from './environment';
 
 /**
- * tar: ファイルアーカイブ管理
+ * tar: アーカイブ作成・抽出
  */
 export function tar(
   args: string[],
@@ -20,56 +20,131 @@ export function tar(
   if (args.length === 0) {
     return {
       stdout: '',
-      stderr: 'tar: no action specified\n',
+      stderr: 'tar: missing operand\n',
       exitCode: 1,
       command: 'tar',
     };
   }
 
-  const options = args[0]; // cvf, xvf など
-  const tarFile = args[1];
-  const sourceFiles = args.slice(2);
+  const create = args.some((a) => a === 'c' || a === '-c' || a.includes('c'));
+  const extract = args.some((a) => a === 'x' || a === '-x' || a.includes('x'));
+  const verbose = args.some((a) => a === 'v' || a === '-v' || a.includes('v'));
+  const file_opt = args.some((a) => a === 'f' || a === '-f' || a.includes('f'));
+  const gzip = args.some((a) => a === 'z' || a === '-z' || a.includes('z'));
 
-  if (options.includes('c')) {
-    // Create archive
-    if (!tarFile || sourceFiles.length === 0) {
+  // ファイル名を取得
+  let tarFile = '';
+  let paths: string[] = [];
+
+  for (let i = 0; i < args.length; i++) {
+    const arg = args[i];
+    if (
+      file_opt &&
+      !arg.startsWith('-') &&
+      !arg.includes('c') &&
+      !arg.includes('x')
+    ) {
+      if (!tarFile) {
+        tarFile = arg;
+      } else {
+        paths.push(arg);
+      }
+    } else if (
+      !arg.startsWith('-') &&
+      !arg.includes('c') &&
+      !arg.includes('x') &&
+      !arg.includes('v') &&
+      !arg.includes('f') &&
+      !arg.includes('z')
+    ) {
+      paths.push(arg);
+    }
+  }
+
+  if (create) {
+    // アーカイブ作成
+    if (!tarFile) {
       return {
         stdout: '',
-        stderr: 'tar: must specify both archive and files\n',
+        stderr: 'tar: must specify archive name\n',
         exitCode: 1,
         command: 'tar',
       };
     }
 
     const tarPath = env.resolvePath(tarFile);
-    let tarContent = 'TAR_ARCHIVE\n';
+    let archiveContent = '';
 
-    for (const file of sourceFiles) {
-      const filePath = env.resolvePath(file);
-      const stats = vfs.getStats(filePath);
+    for (const pathArg of paths) {
+      const absolutePath = env.resolvePath(pathArg);
+      const stats = vfs.getStats(absolutePath);
 
       if (!stats) {
-        if (options.includes('v')) {
-          console.log(`tar: ${file}: No such file or directory`);
-        }
-        continue;
+        return {
+          stdout: '',
+          stderr: `tar: ${pathArg}: No such file or directory\n`,
+          exitCode: 1,
+          command: 'tar',
+        };
       }
 
-      if (options.includes('v')) {
-        // Verbose output
-        console.log(`${file}`);
+      if (verbose) {
+        archiveContent += `${pathArg}\n`;
       }
 
-      const content = vfs.readFile(filePath) || '';
-      tarContent += `FILE:${file}\n${content}\nEND_FILE\n`;
+      const content = vfs.readFile(absolutePath);
+      if (content !== null) {
+        archiveContent += content;
+      }
     }
 
-    // Create tar archive in VFS
-    vfs.writeFile(tarPath, tarContent, false);
+    vfs.writeFile(tarPath, archiveContent, false);
 
     let output = '';
-    if (options.includes('v')) {
-      for (const file of sourceFiles) {
+    if (verbose) {
+      for (const path of paths) {
+        output += `${path}\n`;
+      }
+    }
+
+    return {
+      stdout: output,
+      stderr: '',
+      exitCode: 0,
+      command: 'tar',
+    };
+  }
+
+  if (extract) {
+    // アーカイブ抽出
+    if (!tarFile) {
+      return {
+        stdout: '',
+        stderr: 'tar: must specify archive name\n',
+        exitCode: 1,
+        command: 'tar',
+      };
+    }
+
+    const tarPath = env.resolvePath(tarFile);
+    const content = vfs.readFile(tarPath);
+
+    if (content === null) {
+      return {
+        stdout: '',
+        stderr: `tar: ${tarFile}: No such file or directory\n`,
+        exitCode: 1,
+        command: 'tar',
+      };
+    }
+
+    // 簡易版: ファイルを適当に分割
+    const files = content.split('\n').filter((f) => f.length > 0);
+    let output = '';
+
+    for (const file of files) {
+      vfs.touch(file);
+      if (verbose) {
         output += `${file}\n`;
       }
     }
@@ -82,97 +157,9 @@ export function tar(
     };
   }
 
-  if (options.includes('x')) {
-    // Extract archive
-    if (!tarFile) {
-      return {
-        stdout: '',
-        stderr: 'tar: no archive file specified\n',
-        exitCode: 1,
-        command: 'tar',
-      };
-    }
-
-    const tarPath = env.resolvePath(tarFile);
-    const tarContent = vfs.readFile(tarPath);
-
-    if (!tarContent) {
-      return {
-        stdout: '',
-        stderr: `tar: ${tarFile}: Cannot open: No such file or directory\n`,
-        exitCode: 1,
-        command: 'tar',
-      };
-    }
-
-    const files = tarContent.split('FILE:').slice(1);
-    let output = '';
-
-    for (const file of files) {
-      const [name, ...content] = file.split('\n');
-      const fileContent = content
-        .join('\n')
-        .replace(/\nEND_FILE\n.*/, '')
-        .trimEnd();
-
-      const filePath = env.resolvePath(name);
-      vfs.writeFile(filePath, fileContent, false);
-
-      if (options.includes('v')) {
-        output += `${name}\n`;
-      }
-    }
-
-    return {
-      stdout: output,
-      stderr: '',
-      exitCode: 0,
-      command: 'tar',
-    };
-  }
-
-  if (options.includes('t')) {
-    // List archive contents
-    if (!tarFile) {
-      return {
-        stdout: '',
-        stderr: 'tar: no archive file specified\n',
-        exitCode: 1,
-        command: 'tar',
-      };
-    }
-
-    const tarPath = env.resolvePath(tarFile);
-    const tarContent = vfs.readFile(tarPath);
-
-    if (!tarContent) {
-      return {
-        stdout: '',
-        stderr: `tar: ${tarFile}: Cannot open: No such file or directory\n`,
-        exitCode: 1,
-        command: 'tar',
-      };
-    }
-
-    const files = tarContent.split('FILE:').slice(1);
-    let output = '';
-
-    for (const file of files) {
-      const name = file.split('\n')[0];
-      output += `${name}\n`;
-    }
-
-    return {
-      stdout: output,
-      stderr: '',
-      exitCode: 0,
-      command: 'tar',
-    };
-  }
-
   return {
     stdout: '',
-    stderr: 'tar: unrecognized option\n',
+    stderr: 'tar: must specify either c or x option\n',
     exitCode: 1,
     command: 'tar',
   };
@@ -190,13 +177,15 @@ export function gzip(
   if (args.length === 0) {
     return {
       stdout: '',
-      stderr: 'gzip: no input file\n',
+      stderr: 'gzip: no files specified\n',
       exitCode: 1,
       command: 'gzip',
     };
   }
 
+  const keep = args.some((a) => a === '-k');
   const filePath = env.resolvePath(args[0]);
+
   const content = vfs.readFile(filePath);
 
   if (content === null) {
@@ -208,21 +197,19 @@ export function gzip(
     };
   }
 
-  // 簡易版: .gz ファイルを作成して元ファイルを削除
-  const gzPath = filePath + '.gz';
-  vfs.writeFile(gzPath, `GZIP:${content}`, false);
-  vfs.deleteFile(filePath);
+  // 簡易版: ファイル名に .gz 追加
+  const gzipPath = filePath + '.gz';
+  const compressed = `GZIP::${content.length}::${content.substring(0, 50)}...`;
 
-  const verbose = args.some((a) => a === '-v');
-  let output = '';
+  vfs.writeFile(gzipPath, compressed, false);
 
-  if (verbose) {
-    const reduction = Math.floor(content.length * 0.5);
-    output = `${args[0]}: 50.0% -- replaced with ${args[0]}.gz\n`;
+  if (!keep) {
+    // 元ファイルを削除（実装簡略化）
+    vfs.deleteFile(filePath);
   }
 
   return {
-    stdout: output,
+    stdout: '',
     stderr: '',
     exitCode: 0,
     command: 'gzip',
@@ -241,7 +228,7 @@ export function gunzip(
   if (args.length === 0) {
     return {
       stdout: '',
-      stderr: 'gunzip: no input file\n',
+      stderr: 'gunzip: no files specified\n',
       exitCode: 1,
       command: 'gunzip',
     };
@@ -259,19 +246,22 @@ export function gunzip(
     };
   }
 
-  if (!content.startsWith('GZIP:')) {
+  if (!content.startsWith('GZIP::')) {
     return {
       stdout: '',
-      stderr: `gunzip: ${args[0]}: not in gzip format\n`,
+      stderr: `gunzip: ${args[0]}: not a gzip file\n`,
       exitCode: 1,
       command: 'gunzip',
     };
   }
 
-  // 簡易版: 元のファイルを復元
-  const originalPath = filePath.replace(/\.gz$/, '');
-  const originalContent = content.substring(5);
-  vfs.writeFile(originalPath, originalContent, false);
+  // 簡易版: .gz 拡張子を除去
+  const originalPath = filePath.endsWith('.gz')
+    ? filePath.substring(0, filePath.length - 3)
+    : filePath;
+
+  const decompressed = content.replace(/^GZIP::\d+::/, '');
+  vfs.writeFile(originalPath, decompressed, false);
   vfs.deleteFile(filePath);
 
   return {
@@ -283,7 +273,7 @@ export function gunzip(
 }
 
 /**
- * zip: ファイル圧縮（zip形式）
+ * zip: ファイル圧縮（ZIP形式）
  */
 export function zip(
   args: string[],
@@ -294,46 +284,29 @@ export function zip(
   if (args.length < 2) {
     return {
       stdout: '',
-      stderr: 'zip: missing arguments\n',
+      stderr: 'zip: require at least 2 arguments\n',
       exitCode: 1,
       command: 'zip',
     };
   }
 
   const zipFile = env.resolvePath(args[0]);
-  const sourceFiles = args.slice(1);
+  const files = args.slice(1).map((f) => env.resolvePath(f));
 
-  let zipContent = 'ZIP_ARCHIVE\n';
-  let addedFiles = 0;
+  let archiveContent = '';
 
-  for (const file of sourceFiles) {
-    const filePath = env.resolvePath(file);
-    const content = vfs.readFile(filePath);
+  for (const file of files) {
+    const content = vfs.readFile(file);
 
-    if (content === null) {
-      return {
-        stdout: '',
-        stderr: `zip: ${file}: No such file or directory\n`,
-        exitCode: 1,
-        command: 'zip',
-      };
+    if (content !== null) {
+      archiveContent += `ZIP_ENTRY::${file}::${content}\n`;
     }
-
-    zipContent += `FILE:${file}\n${content}\nEND_FILE\n`;
-    addedFiles++;
   }
 
-  vfs.writeFile(zipFile, zipContent, false);
-
-  const verbose = args.some((a) => a === '-v');
-  let output = '';
-
-  if (verbose) {
-    output = `  adding: ${sourceFiles.join(', ')}\n`;
-  }
+  vfs.writeFile(zipFile, archiveContent, false);
 
   return {
-    stdout: output,
+    stdout: `  adding: ${files.join('...')}\n`,
     stderr: '',
     exitCode: 0,
     command: 'zip',
@@ -341,7 +314,7 @@ export function zip(
 }
 
 /**
- * unzip: ファイル解凍（zip形式）
+ * unzip: ZIP ファイル解凍
  */
 export function unzip(
   args: string[],
@@ -352,49 +325,34 @@ export function unzip(
   if (args.length === 0) {
     return {
       stdout: '',
-      stderr: 'unzip: missing archive file\n',
+      stderr: 'unzip: no files specified\n',
       exitCode: 1,
       command: 'unzip',
     };
   }
 
-  const zipFile = env.resolvePath(args[0]);
-  const zipContent = vfs.readFile(zipFile);
+  const zipPath = env.resolvePath(args[0]);
+  const content = vfs.readFile(zipPath);
 
-  if (zipContent === null) {
+  if (content === null) {
     return {
       stdout: '',
-      stderr: `unzip: cannot find or open ${args[0]}\n`,
+      stderr: `unzip: ${args[0]}: No such file or directory\n`,
       exitCode: 1,
       command: 'unzip',
     };
   }
 
-  if (!zipContent.startsWith('ZIP_ARCHIVE')) {
-    return {
-      stdout: '',
-      stderr: `unzip: ${args[0]}: not a zip file\n`,
-      exitCode: 1,
-      command: 'unzip',
-    };
-  }
+  const entries = content.split('\n').filter((e) => e.startsWith('ZIP_ENTRY::'));
+  let output = 'Archive:  ' + args[0] + '\n';
 
-  const files = zipContent.split('FILE:').slice(1);
-  let output = 'Archive: ' + args[0] + '\n';
-
-  for (const file of files) {
-    const lines = file.split('\n');
-    const name = lines[0];
-    const content = lines
-      .slice(1)
-      .join('\n')
-      .replace(/\nEND_FILE\n.*/, '')
-      .trimEnd();
-
-    const filePath = env.resolvePath(name);
-    vfs.writeFile(filePath, content, false);
-
-    output += `  inflating: ${name}\n`;
+  for (const entry of entries) {
+    const match = entry.match(/^ZIP_ENTRY::(.+?)::(.+)$/);
+    if (match) {
+      const [, filePath, fileContent] = match;
+      vfs.writeFile(env.resolvePath(filePath), fileContent, false);
+      output += `  inflating: ${filePath}\n`;
+    }
   }
 
   return {
@@ -406,7 +364,7 @@ export function unzip(
 }
 
 /**
- * dnf: パッケージ管理（Fedora/RHEL用、モック）
+ * dnf: パッケージ管理（モック版）
  */
 export function dnf(
   args: string[],
@@ -416,114 +374,109 @@ export function dnf(
 ): CommandResult {
   if (args.length === 0) {
     return {
-      stdout: 'usage: dnf [options] COMMAND\n',
+      stdout: 'dnf: no command specified\n',
       stderr: '',
-      exitCode: 0,
+      exitCode: 1,
       command: 'dnf',
     };
   }
 
-  const command = args[0];
+  const subcmd = args[0];
+  const package_name = args[1] || '';
 
   // モック用パッケージリスト
-  const mockPackages: { [key: string]: string } = {
-    nginx: '1.24.0-1.fc39.x86_64',
-    apache2: '2.4.57-1.fc39.x86_64',
-    nodejs: '18.17.0-1.fc39.x86_64',
-    python3: '3.11.5-1.fc39.x86_64',
-    git: '2.42.0-1.fc39.x86_64',
-    curl: '8.3.0-1.fc39.x86_64',
-    wget: '1.21.4-1.fc39.x86_64',
-    vim: '9.0.1234-1.fc39.x86_64',
-    nano: '7.2-1.fc39.x86_64',
-    htop: '3.2.2-1.fc39.x86_64',
+  const packages: { [key: string]: { version: string; repo: string } } = {
+    'nginx': { version: '1.24.0', repo: 'appstream' },
+    'git': { version: '2.41.0', repo: 'appstream' },
+    'python3': { version: '3.11.5', repo: 'appstream' },
+    'nodejs': { version: '18.18.0', repo: 'appstream' },
+    'docker': { version: '24.0.6', repo: 'docker-ce' },
+    'curl': { version: '8.3.0', repo: 'appstream' },
+    'wget': { version: '1.21.4', repo: 'appstream' },
   };
 
-  if (command === 'search' && args.length > 1) {
-    const keyword = args[1];
-    let output = 'Searching for packages matching: ' + keyword + '\n\n';
-
-    for (const [pkg, version] of Object.entries(mockPackages)) {
-      if (pkg.includes(keyword)) {
-        output += `${pkg}.x86_64 : ${version}\n`;
+  switch (subcmd) {
+    case 'search':
+      let output = '';
+      for (const [name, info] of Object.entries(packages)) {
+        if (name.includes(package_name)) {
+          output += `${name}.x86_64 : Package search\n  Repository: ${info.repo}\n  Version   : ${info.version}\n\n`;
+        }
       }
-    }
+      return {
+        stdout: output || `No matches for ${package_name}\n`,
+        stderr: '',
+        exitCode: 0,
+        command: 'dnf',
+      };
 
-    return {
-      stdout: output || 'No matching packages found.\n',
-      stderr: '',
-      exitCode: 0,
-      command: 'dnf',
-    };
-  }
-
-  if (command === 'install' && args.length > 1) {
-    const packages = args.slice(1);
-    let output = 'Last metadata expiration check done.\n';
-
-    for (const pkg of packages) {
-      if (mockPackages[pkg]) {
-        output += `Installing: ${pkg} ${mockPackages[pkg]}\n`;
-        output += `Installed: ${pkg}.x86_64 ${mockPackages[pkg]}\n`;
-      } else {
-        output += `No package ${pkg} available.\n`;
+    case 'list':
+      let listOutput = 'Installed Packages\n';
+      for (const [name, info] of Object.entries(packages)) {
+        listOutput += `${name}.x86_64 ${info.version} ${info.repo}\n`;
       }
-    }
+      return {
+        stdout: listOutput,
+        stderr: '',
+        exitCode: 0,
+        command: 'dnf',
+      };
 
-    return {
-      stdout: output,
-      stderr: '',
-      exitCode: 0,
-      command: 'dnf',
-    };
-  }
-
-  if (command === 'remove' && args.length > 1) {
-    const packages = args.slice(1);
-    let output = '';
-
-    for (const pkg of packages) {
-      if (mockPackages[pkg]) {
-        output += `Removing: ${pkg}\n`;
-        output += `Removed: ${pkg}.x86_64\n`;
-      } else {
-        output += `No package ${pkg} installed.\n`;
+    case 'install':
+      if (!package_name) {
+        return {
+          stdout: '',
+          stderr: 'dnf: no package specified\n',
+          exitCode: 1,
+          command: 'dnf',
+        };
       }
-    }
 
-    return {
-      stdout: output,
-      stderr: '',
-      exitCode: 0,
-      command: 'dnf',
-    };
+      if (packages[package_name]) {
+        return {
+          stdout: `Installed: ${package_name}-${packages[package_name].version}\n`,
+          stderr: '',
+          exitCode: 0,
+          command: 'dnf',
+        };
+      }
+
+      return {
+        stdout: '',
+        stderr: `No package matching '${package_name}' found.\n`,
+        exitCode: 1,
+        command: 'dnf',
+      };
+
+    case 'remove':
+      if (!package_name) {
+        return {
+          stdout: '',
+          stderr: 'dnf: no package specified\n',
+          exitCode: 1,
+          command: 'dnf',
+        };
+      }
+
+      return {
+        stdout: `Removed: ${package_name}\n`,
+        stderr: '',
+        exitCode: 0,
+        command: 'dnf',
+      };
+
+    default:
+      return {
+        stdout: '',
+        stderr: `dnf: unknown subcommand '${subcmd}'\n`,
+        exitCode: 1,
+        command: 'dnf',
+      };
   }
-
-  if (command === 'list') {
-    let output = 'Installed Packages\n';
-
-    for (const [pkg, version] of Object.entries(mockPackages)) {
-      output += `${pkg}.x86_64 ${version}\n`;
-    }
-
-    return {
-      stdout: output,
-      stderr: '',
-      exitCode: 0,
-      command: 'dnf',
-    };
-  }
-
-  return {
-    stdout: '',
-    stderr: `dnf: unknown command '${command}'\n`,
-    exitCode: 1,
-    command: 'dnf',
-  };
 }
 
 /**
- * apt: パッケージ管理（Debian/Ubuntu用、モック）
+ * apt: パッケージ管理（Debian/Ubuntu モック版）
  */
 export function apt(
   args: string[],
@@ -533,107 +486,103 @@ export function apt(
 ): CommandResult {
   if (args.length === 0) {
     return {
-      stdout: 'usage: apt [options] COMMAND\n',
+      stdout: 'apt: no command specified\n',
       stderr: '',
-      exitCode: 0,
+      exitCode: 1,
       command: 'apt',
     };
   }
 
-  const command = args[0];
+  const subcmd = args[0];
+  const package_name = args[1] || '';
 
   // モック用パッケージリスト
-  const mockPackages: { [key: string]: string } = {
-    nginx: '1.24.0-1ubuntu1',
-    apache2: '2.4.57-1ubuntu1',
-    nodejs: '18.17.0-1nodesource1',
-    python3: '3.11.5-1ubuntu1',
-    git: '1:2.42.0-1ubuntu1',
-    curl: '7.85.0-1ubuntu1',
-    wget: '1.21.4-1ubuntu1',
-    vim: '2:9.0.1234-1ubuntu1',
-    nano: '7.2-1ubuntu1',
-    htop: '3.2.2-1ubuntu1',
+  const packages: { [key: string]: { version: string; origin: string } } = {
+    'nginx': { version: '1.24.1', origin: 'Ubuntu' },
+    'git': { version: '1:2.41.0-1', origin: 'Ubuntu' },
+    'python3': { version: '3.11.5-1', origin: 'Ubuntu' },
+    'nodejs': { version: '18.18.0', origin: 'NodeSource' },
+    'docker.io': { version: '24.0.6-1', origin: 'Docker' },
+    'curl': { version: '8.3.0-1', origin: 'Ubuntu' },
+    'wget': { version: '1.21.4-1', origin: 'Ubuntu' },
   };
 
-  if (command === 'search' && args.length > 1) {
-    const keyword = args[1];
-    let output = `Searching for ${keyword}...\n\n`;
-
-    for (const [pkg, version] of Object.entries(mockPackages)) {
-      if (pkg.includes(keyword)) {
-        output += `${pkg}/${version} - ${pkg} web server\n`;
+  switch (subcmd) {
+    case 'search':
+      let output = '';
+      for (const [name, info] of Object.entries(packages)) {
+        if (name.includes(package_name)) {
+          output += `${name}/jammy 1.0.0 amd64\n  Description: Package for ${name}\n`;
+        }
       }
-    }
+      return {
+        stdout: output || `No packages matching '${package_name}'\n`,
+        stderr: '',
+        exitCode: 0,
+        command: 'apt',
+      };
 
-    return {
-      stdout: output || 'No packages found.\n',
-      stderr: '',
-      exitCode: 0,
-      command: 'apt',
-    };
-  }
-
-  if (command === 'install' && args.length > 1) {
-    const packages = args.slice(1);
-    let output = 'Reading package lists... Done\n';
-    output += 'Building dependency tree... Done\n\n';
-
-    for (const pkg of packages) {
-      if (mockPackages[pkg]) {
-        output += `Setting up ${pkg} (${mockPackages[pkg]})...\n`;
-      } else {
-        output += `Unable to locate package ${pkg}\n`;
+    case 'list':
+      let listOutput = 'Listing...\n';
+      for (const [name, info] of Object.entries(packages)) {
+        listOutput += `${name}/${info.origin} ${info.version}\n`;
       }
-    }
+      return {
+        stdout: listOutput,
+        stderr: '',
+        exitCode: 0,
+        command: 'apt',
+      };
 
-    return {
-      stdout: output,
-      stderr: '',
-      exitCode: 0,
-      command: 'apt',
-    };
-  }
-
-  if (command === 'remove' && args.length > 1) {
-    const packages = args.slice(1);
-    let output = '';
-
-    for (const pkg of packages) {
-      if (mockPackages[pkg]) {
-        output += `Removing ${pkg} (${mockPackages[pkg]})...\n`;
-      } else {
-        output += `Package ${pkg} is not installed.\n`;
+    case 'install':
+      if (!package_name) {
+        return {
+          stdout: '',
+          stderr: 'apt: no package specified\n',
+          exitCode: 1,
+          command: 'apt',
+        };
       }
-    }
 
-    return {
-      stdout: output,
-      stderr: '',
-      exitCode: 0,
-      command: 'apt',
-    };
+      if (packages[package_name]) {
+        return {
+          stdout: `Setting up ${package_name} (${packages[package_name].version}) ...\n`,
+          stderr: '',
+          exitCode: 0,
+          command: 'apt',
+        };
+      }
+
+      return {
+        stdout: '',
+        stderr: `Unable to locate package ${package_name}\n`,
+        exitCode: 1,
+        command: 'apt',
+      };
+
+    case 'remove':
+      if (!package_name) {
+        return {
+          stdout: '',
+          stderr: 'apt: no package specified\n',
+          exitCode: 1,
+          command: 'apt',
+        };
+      }
+
+      return {
+        stdout: `Removing ${package_name}...\n`,
+        stderr: '',
+        exitCode: 0,
+        command: 'apt',
+      };
+
+    default:
+      return {
+        stdout: '',
+        stderr: `apt: unknown subcommand '${subcmd}'\n`,
+        exitCode: 1,
+        command: 'apt',
+      };
   }
-
-  if (command === 'list') {
-    let output = 'Installed packages:\n';
-
-    for (const [pkg, version] of Object.entries(mockPackages)) {
-      output += `${pkg}/${version} [installed]\n`;
-    }
-
-    return {
-      stdout: output,
-      stderr: '',
-      exitCode: 0,
-      command: 'apt',
-    };
-  }
-
-  return {
-    stdout: '',
-    stderr: `apt: command '${command}' not recognized\n`,
-    exitCode: 1,
-    command: 'apt',
-  };
 }
