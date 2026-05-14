@@ -1,145 +1,128 @@
-export type TaskLevel = '初級' | '中級' | '上級' | 'エキスパート';
+import { GoogleGenAI } from '@google/genai';
 
 export interface TrainingTask {
   id: string;
-  level: TaskLevel;
+  level: '初級' | '中級' | '上級' | 'エキスパート';
   title: string;
   desc: string;
   expectedCmd: string;
-  validator?: (cmd: string, config?: any) => boolean | Promise<boolean> | { valid: boolean, reason?: string } | Promise<{ valid: boolean, reason?: string }>;
+  validator: (cmd: string, context?: any) => boolean | { valid: boolean; reason?: string } | Promise<boolean | { valid: boolean; reason?: string }>;
   completedMsg: string;
-  mockOutput?: string | string[];
-  hint?: string;
+  hint: string;
+  explanation?: string;
 }
 
-import { GoogleGenAI } from "@google/genai";
+export const initialSshHost = '172.16.158.107';
+export const initialSshUser = 'user';
 
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY || "" });
-
-export const aiValidator = async (task: TrainingTask, cmd: string): Promise<{ valid: boolean, reason?: string }> => {
-  const norm = cmd.trim().replace(/\s+/g, ' ');
-  if (norm === task.expectedCmd) {
-    return { valid: true };
-  }
-
-  const prompt = `
-    You are a strict Linux terminal exercise evaluator.
-    The task is: "${task.title}".
-    The description is: "${task.desc}".
-    The explicitly expected command is: "${task.expectedCmd}".
-    The user entered command: "${cmd}".
-    
-    Evaluate if the user's command successfully achieves the task.
-    You MUST be extremely strict. If the user command is just random characters like "aaa", or it's a completely unrelated command, or it's missing required arguments that affect the result in Linux, you MUST evaluate it as false.
-    The explicitly expected command is just one way, but if their command does exactly the same thing, it's valid. Otherwise it's invalid.
-    Output your response in valid JSON format ONLY, without markdown code blocks, like this:
-    {
-      "valid": false,
-      "reason": "あなたが入力したコマンドは〇〇ですが、正しくは〇〇です。"
+const ai = new GoogleGenAI({
+  apiKey: process.env.GEMINI_API_KEY || '',
+  httpOptions: {
+    headers: {
+      'User-Agent': 'aistudio-build',
     }
-  `;
-  
+  }
+});
+
+export const aiValidator = async (task: TrainingTask, cmd: string) => {
   try {
-      const response = await ai.models.generateContent({
-        model: "gemini-1.5-flash",
-        contents: prompt,
-      });
-      const text = response.text || "";
-      const match = text.match(/\{[\s\S]*\}/);
-      if (match) {
-          try {
-              const result = JSON.parse(match[0]);
-              return { valid: result.valid === true || result.valid === "true", reason: result.reason };
-          } catch (e) {
-              console.error("JSON parse error:", e);
-          }
-      }
-      return { valid: false, reason: "AIの判定に失敗しました。もう一度入力してください。" };
+    const prompt = `Task: ${task.title}\nExpected: ${task.expectedCmd}\nUser command: ${cmd}\nIs this command equivalent and correct for the task? Answer only YES or NO.`;
+    const result = await ai.models.generateContent({
+      model: 'gemini-1.5-flash',
+      contents: [{ parts: [{ text: prompt }] }]
+    });
+    return result.text.trim().toUpperCase().includes('YES');
   } catch (e) {
-      console.error("AI validation failed", e);
-      return { valid: false, reason: "AIの判定に失敗しました。" };
+    return false;
   }
 };
 
-export const getRandomInt = (min: number, max: number) => Math.floor(Math.random() * (max - min + 1)) + min;
-export const getRandomItem = <T>(arr: T[]): T => arr[Math.floor(arr.length) * arr.length / arr.length] || arr[0]; // simple fix for potentially undefined
-
-export const initialSshHost = `172.16.${getRandomInt(1, 200)}.${getRandomInt(1, 254)}`;
-export const initialSshUser = getRandomItem(['user', 'admin', 'dev', 'guest', 'operator']);
-export const initialSshPass = 'password';
-
-export const generateTrainingTasks = (sshHost: string, sshUser: string, sshPort: string): TrainingTask[] => {
+export const generateTrainingTasks = (sshHost?: string, sshUser?: string, apiKey?: string): TrainingTask[] => {
   const fileName = 'file.txt';
-  
   const tasks: TrainingTask[] = [
-    // --- 初級 (20 tasks) ---
-    { id: 'b1', level: '初級', title: 'SSHログイン', desc: `SSH経由でサーバーにログインしてください。\nHost: ${sshHost}\nUser: ${sshUser}\nPassword: ${initialSshPass}${sshPort !== '22' ? `\nPort: ${sshPort}` : ''}`, expectedCmd: `ssh ${sshPort!=='22' ? '-p '+sshPort+' ' : ''}${sshUser}@${sshHost}`, validator: async (c, config) => {
-      if (config && config.type === 'ssh') {
-        if (config.host === sshHost && config.username === sshUser && config.password === initialSshPass && (config.port?.toString() || '22') === sshPort.toString()) return { valid: true };
-      }
-      return { valid: c.trim().replace(/\s+/g, ' ') === `ssh ${sshPort!=='22' ? '-p '+sshPort+' ' : ''}${sshUser}@${sshHost}` };
-    }, completedMsg: 'ログインに成功しました！', hint: 'ssh user@host の形式です。' },
-    { id: 'b2', level: '初級', title: '現在位置の確認', desc: '現在の作業ディレクトリパスを表示してください。', expectedCmd: 'pwd', validator: (c) => c.trim() === 'pwd', completedMsg: '正解です！', hint: 'Print Working Directory' },
-    { id: 'b3', level: '初級', title: 'ファイルの一覧表示', desc: '現在のディレクトリ内のファイルを表示してください。', expectedCmd: 'ls', validator: (c) => /^ls(\s+)?$/.test(c.trim()), completedMsg: '表示できました。', hint: 'LiSt' },
-    { id: 'b4', level: '初級', title: '隠しファイルを含む一覧', desc: '隠しファイルを含むすべてのファイルを表示してください。', expectedCmd: 'ls -a', validator: (c) => /^ls\s+(-a|-la|-al)(\s+.*)?$/.test(c.trim().replace(/\s+/g, ' ')), completedMsg: '隠しファイルが見えました。', hint: 'All' },
-    { id: 'b5', level: '初級', title: 'ファイルのリスト表示', desc: '詳細（パーミッション等）を含めて表示してください。', expectedCmd: 'ls -l', validator: (c) => /^ls\s+(-l|-la|-al)(\s+.*)?$/.test(c.trim().replace(/\s+/g, ' ')), completedMsg: '詳細が確認できます。', hint: 'Long format' },
-    { id: 'b6', level: '初級', title: 'ディレクトリの移動', desc: '/etc ディレクトリへ移動してください。', expectedCmd: 'cd /etc', validator: (c) => /^cd\s+\/etc\/?$/.test(c.trim().replace(/\s+/g, ' ')), completedMsg: '移動成功。', hint: 'Change Directory' },
-    { id: 'b7', level: '初級', title: '親ディレクトリへ', desc: '1つ上のディレクトリに移動してください。', expectedCmd: 'cd ..', validator: (c) => /^cd\s+\.\.\/?$/.test(c.trim().replace(/\s+/g, ' ')), completedMsg: '戻りました。', hint: '.. は親です。' },
-    { id: 'b8', level: '初級', title: 'ホームへ戻る', desc: '自分のホームディレクトリに戻ってください。', expectedCmd: 'cd', validator: (c) => /^cd(\s+~)?$/.test(c.trim()), completedMsg: 'ただいま。', hint: 'cd のみ。' },
-    { id: 'b9', level: '初級', title: '内容の表示', desc: `${fileName} の内容を画面に出力してください。`, expectedCmd: `cat ${fileName}`, validator: (c) => c.trim().replace(/\s+/g, ' ') === `cat ${fileName}`, completedMsg: '読めました。', hint: 'cat' },
-    { id: 'b10', level: '初級', title: '空ファイル作成', desc: `touchで ${fileName} という名前のファイルを作成してください。`, expectedCmd: `touch ${fileName}`, validator: (c) => c.trim().replace(/\s+/g, ' ') === `touch ${fileName}`, completedMsg: '作成完了。', hint: 'touch filename' },
-    { id: 'b11', level: '初級', title: 'ディレクトリ作成', desc: 'mkdirで myproject というディレクトリを作成してください。', expectedCmd: 'mkdir myproject', validator: (c) => c.trim().replace(/\s+/g, ' ') === 'mkdir myproject', completedMsg: '箱ができました。', hint: 'MaKe DIRectory' },
-    { id: 'b12', level: '初級', title: 'コピー', desc: `${fileName} を backup.txt にコピーしてください。`, expectedCmd: 'cp file.txt backup.txt', validator: (c) => c.trim().replace(/\s+/g, ' ') === 'cp file.txt backup.txt', completedMsg: '複製完了。', hint: 'CoPy' },
-    { id: 'b13', level: '初級', title: '名前変更', desc: 'backup.txt の名前を old_backup.txt に変更してください。', expectedCmd: 'mv backup.txt old_backup.txt', validator: (c) => c.trim().replace(/\s+/g, ' ') === 'mv backup.txt old_backup.txt', completedMsg: '変更されました。', hint: 'MoVe' },
-    { id: 'b14', level: '初級', title: '削除', desc: 'old_backup.txt を削除してください。', expectedCmd: 'rm old_backup.txt', validator: (c) => c.trim().replace(/\s+/g, ' ') === 'rm old_backup.txt', completedMsg: '消えました。', hint: 'ReMove' },
-    { id: 'b15', level: '初級', title: 'ディレクトリ削除', desc: '空の myproject ディレクトリを削除してください。', expectedCmd: 'rmdir myproject', validator: (c) => ['rmdir myproject', 'rm -r myproject'].includes(c.trim().replace(/\s+/g, ' ')), completedMsg: '更地。', hint: 'rmdir' },
-    { id: 'b16', level: '初級', title: 'マニュアル', desc: 'mvコマンドの使い方（manページ）を見てください。', expectedCmd: 'man mv', validator: (c) => c.trim().replace(/\s+/g, ' ') === 'man mv', completedMsg: '使い方が書いてあります。', hint: 'man' },
-    { id: 'b17', level: '初級', title: 'クリア', desc: '画面を綺麗にしてください。', expectedCmd: 'clear', validator: (c) => c.trim() === 'clear', completedMsg: 'スッキリ。', hint: 'clear' },
-    { id: 'b18', level: '初級', title: '出力', desc: '"Hello Linux" と出力してください。', expectedCmd: 'echo Hello Linux', validator: (c) => /^echo\s+("?'?Hello\s+Linux"?'?|Hello\s+Linux)$/.test(c.trim().replace(/\s+/g, ' ')), completedMsg: 'Hello!', hint: 'echo' },
-    { id: 'b19', level: '初級', title: 'カレンダー', desc: '今月のカレンダーを確認してください。', expectedCmd: 'cal', validator: (c) => c.trim() === 'cal', completedMsg: '今日は何日？', hint: 'cal' },
-    { id: 'b20', level: '初級', title: '日付', desc: '現在の日時を表示してください。', expectedCmd: 'date', validator: (c) => c.trim() === 'date', completedMsg: 'Time is money.', hint: 'date' },
+    // --- 初級 (40 tasks: b1 - b40) ---
+    { id: 'b1', level: '初級', title: 'SSHでサーバーに接続する', desc: 'リモートサーバーにログインしてください。', expectedCmd: 'ssh user@172.16.158.107', validator: (c) => /ssh\s+user@172\.16\.158\.107/.test(c.trim()), completedMsg: 'ログインに成功しました！', hint: 'ssh user@host', explanation: 'SSH (Secure Shell) は、暗号化通信を使って遠隔地のサーバーを操作するためのプロトコールです。' },
+    { id: 'b2', level: '初級', title: 'ファイルの一覧を確認する', desc: '現在のディレクトリにあるファイルを表示してください。', expectedCmd: 'ls', validator: (c) => /^ls/.test(c.trim()), completedMsg: 'ファイルが確認できました。', hint: 'ls', explanation: 'lsコマンドは、指定したディレクトリの内容を表示します。' },
+    { id: 'b3', level: '初級', title: '詳細な情報を表示する', desc: 'パーミッションや所有者、サイズなどを含めて表示してください。', expectedCmd: 'ls -l', validator: (c) => /ls\s+.*-l/.test(c.trim()), completedMsg: '詳細情報が表示されました。', hint: 'ls -l', explanation: '-l オプションはロングフォーマット（詳細形式）で表示します。' },
+    { id: 'b4', level: '初級', title: '隠しファイルも含めて表示する', desc: '「.」で始まるファイルも含めてすべて表示してください。', expectedCmd: 'ls -a', validator: (c) => /ls\s+.*-a/.test(c.trim()), completedMsg: '隠しファイルが見つかりました。', hint: 'ls -a', explanation: '-a オプションは「all」を意味し、隠しファイルも表示します。' },
+    { id: 'b5', level: '初級', title: '現在のディレクトリを表示する', desc: '自分が今どこにいるか（絶対パス）を表示してください。', expectedCmd: 'pwd', validator: (c) => c.trim() === 'pwd', completedMsg: '現在地がわかりました。', hint: 'pwd', explanation: 'pwdは「Print Working Directory」の略です。' },
+    { id: 'b6', level: '初級', title: '特定のディレクトリへ移動する', desc: '/etc ディレクトリへ移動してください。', expectedCmd: 'cd /etc', validator: (c, ctx) => ctx?.shell?.pwd() === '/etc', completedMsg: '移動に成功しました。', hint: 'cd /etc', explanation: 'cd はディレクトリを移動するための基本コマンドです。' },
+    { id: 'b7', level: '初級', title: 'ルートディレクトリへ移動する', desc: '最上位の階層（/）へ移動してください。', expectedCmd: 'cd /', validator: (c, ctx) => ctx?.shell?.pwd() === '/', completedMsg: 'ルートへ到着しました。', hint: 'cd /', explanation: '「/」はシステムの根幹となるディレクトリです。' },
+    { id: 'b8', level: '初級', title: 'ホームディレクトリへ戻る', desc: '自分のホーム（~）に戻ってください。', expectedCmd: 'cd ~', validator: (c, ctx) => ctx?.shell?.pwd() === '/home/user', completedMsg: 'ホームへ戻りました。', hint: 'cd ~', explanation: '「~」はログインユーザーのホームへのショートカットです。' },
+    { id: 'b9', level: '初級', title: '新しいディレクトリを作成する', desc: '「backup」というディレクトリを作成してください。', expectedCmd: 'mkdir backup', validator: (c, ctx) => !!ctx?.vfs?.getNode('/home/user/backup'), completedMsg: 'ディレクトリを作成しました。', hint: 'mkdir backup', explanation: 'mkdirは新しいディレクトリを作成します。' },
+    { id: 'b10', level: '初級', title: '空のファイルを作成する', desc: '「note.txt」という空のファイルを作成してください。', expectedCmd: 'touch note.txt', validator: (c, ctx) => !!ctx?.vfs?.getNode('/home/user/note.txt'), completedMsg: 'ファイルが作成されました。', hint: 'touch note.txt', explanation: 'touchはファイルを新規作成する場合によく使われます。' },
+    { id: 'b11', level: '初級', title: 'ファイルをコピーする', desc: 'note.txt を copy.txt としてコピーしてください。', expectedCmd: 'cp note.txt copy.txt', validator: (c, ctx) => !!ctx?.vfs?.getNode('/home/user/copy.txt'), completedMsg: 'コピーが完了しました。', hint: 'cp', explanation: '既存のファイルを別名で複製します。' },
+    { id: 'b12', level: '初級', title: 'ファイル名を変更する', desc: 'copy.txt を result.txt に変更してください。', expectedCmd: 'mv copy.txt result.txt', validator: (c, ctx) => !!ctx?.vfs?.getNode('/home/user/result.txt') && !ctx?.vfs?.getNode('/home/user/copy.txt'), completedMsg: '名前を変更しました。', hint: 'mv', explanation: 'mv は移動だけでなく、名前の変更にも使われます。' },
+    { id: 'b13', level: '初級', title: 'ファイルを削除する', desc: 'result.txt を削除してください。', expectedCmd: 'rm result.txt', validator: (c, ctx) => !ctx?.vfs?.getNode('/home/user/result.txt'), completedMsg: 'ファイルを削除しました。', hint: 'rm', explanation: 'Linuxにゴミ箱はないので、削除には注意が必要です。' },
+    { id: 'b14', level: '初級', title: '空のディレクトリを削除する', desc: '作成した backup ディレクトリを削除してください。', expectedCmd: 'rmdir backup', validator: (c, ctx) => !ctx?.vfs?.getNode('/home/user/backup'), completedMsg: 'ディレクトリを削除しました。', hint: 'rmdir', explanation: 'rmdirは空のディレクトリ専用の削除コマンドです。' },
+    { id: 'b15', level: '初級', title: 'ファイルの内容を表示する', desc: '/etc/hostname の内容を表示してください。', expectedCmd: 'cat /etc/hostname', validator: (c) => /cat\s+\/etc\/hostname/.test(c.trim()), completedMsg: '内容が表示されました。', hint: 'cat', explanation: 'ファイルの中身を標準出力に書き出します。' },
+    { id: 'b16', level: '初級', title: 'コマンドのヘルプを確認する', desc: 'ls コマンドのヘルプオプションを使ってください。', expectedCmd: 'ls --help', validator: (c) => /ls\s+--help/.test(c.trim()), completedMsg: 'ヘルプが表示されました。', hint: 'ls --help', explanation: '多くのコマンドは --help で使い方を確認できます。' },
+    { id: 'b17', level: '初級', title: '画面の内容を消去する', desc: 'ターミナル画面の表示を一度クリアしてください。', expectedCmd: 'clear', validator: (c) => c.trim() === 'clear', completedMsg: '画面がきれいになりました。', hint: 'clear', explanation: '画面をリフレッシュして見やすくします。' },
+    { id: 'b18', level: '初級', title: '現在の日時を表示する', desc: '現在の日付と時刻を表示してください。', expectedCmd: 'date', validator: (c) => c.trim() === 'date', completedMsg: '日時が表示されました。', hint: 'date', explanation: 'システムの現在時刻を確認します。' },
+    { id: 'b19', level: '初級', title: 'カレンダーを表示してみる', desc: '今月のカレンダーを表示してください。', expectedCmd: 'cal', validator: (c) => c.trim() === 'cal', completedMsg: 'カレンダーです！', hint: 'cal', explanation: 'テキスト形式のカレンダーを表示します。' },
+    { id: 'b20', level: '初級', title: '指定した文字列を画面に出す', desc: '「Linux Training Started」と表示してください。', expectedCmd: 'echo "Linux Training Started"', validator: (c) => /echo\s+.*Linux Training Started/.test(c.trim()), completedMsg: '出力されました。', hint: 'echo', explanation: 'echoは引数をそのまま表示します。' },
+    { id: 'b21', level: '初級', title: 'ファイルの上位数行を読み取る', desc: '/etc/passwd の最初の3行のみ表示してください。', expectedCmd: 'head -n 3 /etc/passwd', validator: (c) => /head\s+-n\s+3/.test(c.trim()), completedMsg: '最初の3行です。', hint: 'head', explanation: '大きいファイルの冒頭を確認する際に役立ちます。' },
+    { id: 'b22', level: '初級', title: 'ファイルの末尾数行を読み取る', desc: '/etc/services の最後の5行を表示してください。', expectedCmd: 'tail -n 5 /etc/services', validator: (c) => /tail\s+-n\s+5/.test(c.trim()), completedMsg: '最後の5行です。', hint: 'tail', explanation: 'ログの最新の変化を追うのに使われます。' },
+    { id: 'b23', level: '初級', title: 'コマンドの実行履歴を確認する', desc: '今までに入力したコマンドの履歴を見てみましょう。', expectedCmd: 'history', validator: (c) => c.trim() === 'history', completedMsg: '履歴が表示されました。', hint: 'history', explanation: 'これまでの実行コマンドを一覧します。' },
+    { id: 'b24', level: '初級', title: 'コマンドの実行ファイルの場所を調べる', desc: '「ls」コマンドの実体がどこにあるか表示してください。', expectedCmd: 'which ls', validator: (c) => /which\s+ls/.test(c.trim()), completedMsg: 'フルパスがわかりました。', hint: 'which', explanation: 'PATHの中から実行ファイルを検索します。' },
+    { id: 'b25', level: '初級', title: 'ファイルの一覧を逆順にする', desc: 'lsの結果を名前の降順（逆順）で表示してください。', expectedCmd: 'ls -r', validator: (c) => /ls\s+.*-r/.test(c.trim()), completedMsg: '逆順になりました。', hint: 'ls -r', explanation: 'ソート順を反転させます。' },
+    { id: 'b26', level: '初級', title: 'OSの詳細情報を確認する', desc: 'Linuxカーネルの情報を全表示してください。', expectedCmd: 'uname -a', validator: (c) => /uname\s+-a/.test(c.trim()), completedMsg: '自己紹介完了！', hint: 'uname', explanation: 'システム情報を取得します。' },
+    { id: 'b27', level: '初級', title: 'メモリの使用状況を表示する', desc: '物理メモリの使用量・空き量を表示してください。', expectedCmd: 'free', validator: (c) => c.trim() === 'free', completedMsg: '資源管理ですね。', hint: 'free', explanation: 'メモリとスワップの使用状況です。' },
+    { id: 'b28', level: '初級', title: 'システムの稼働時間を調べる', desc: '起動してからの時間と負荷を表示してください。', expectedCmd: 'uptime', validator: (c) => c.trim() === 'uptime', completedMsg: 'よく働いています。', hint: 'uptime', explanation: '稼働時間とロードアベレージです。' },
+    { id: 'b29', level: '初級', title: '自分のユーザー名を表示する', desc: '今ログインしている自分のユーザー名を確認してください。', expectedCmd: 'whoami', validator: (c) => c.trim() === 'whoami', completedMsg: 'あなたはログイン中です。', hint: 'whoami', explanation: '現在の実効ユーザー名です。' },
+    { id: 'b30', level: '初級', title: 'コマンドに短い別名をつける', desc: '「ls -la」を「ll」で呼び出せるようにしてください。', expectedCmd: "alias ll='ls -la'", validator: (c) => /alias\s+ll=/.test(c.trim()), completedMsg: '便利になりました！', hint: 'alias', explanation: 'よく使う長いコマンドを短縮できます。' },
+    { id: 'b31', level: '初級', title: '環境変数を一覧表示する', desc: '設定されている環境変数をすべて表示してください。', expectedCmd: 'env', validator: (c) => c.trim() === 'env' || c.trim() === 'printenv', completedMsg: 'ズラリと出ましたね。', hint: 'env', explanation: '環境に関わる変数のリストです。' },
+    { id: 'b32', level: '初級', title: '長いファイルを1画面ずつ読む', desc: '/etc/services を less でスクロールしながら見てください。', expectedCmd: 'less /etc/services', validator: (c) => /less\s+/.test(c.trim()), completedMsg: 'ページャが起動しました。', hint: 'less', explanation: '読み込み時のメモリ消費が少なく、大きなファイル向きです。' },
+    { id: 'b33', level: '初級', title: 'ファイルを新しい順に並べる', desc: '更新日時が新しいものから順に表示してください。', expectedCmd: 'ls -t', validator: (c) => /ls\s+.*-t/.test(c.trim()), completedMsg: '最新順になりました。', hint: 'ls -t', explanation: 'タイムスタンプでソートします。' },
+    { id: 'b34', level: '初級', title: '分かりやすい単位でサイズ表示する', desc: 'ファイルサイズをKB/MB等で表示（人間が見やすく）してください。', expectedCmd: 'ls -lh', validator: (c) => /ls\s+.*-lh/.test(c.trim()), completedMsg: 'サイズが分かりやすくなりました。', hint: 'ls -lh', explanation: 'Human Readableオプションです。' },
+    { id: 'b35', level: '初級', title: '実行パスの環境変数を確認する', desc: '$PATH の値を echo で出力してください。', expectedCmd: 'echo $PATH', validator: (c) => /echo\s+\$PATH/.test(c.trim()), completedMsg: '道筋が見えました。', hint: 'echo $PATH', explanation: 'コマンドを探索する際の基礎知識です。' },
+    { id: 'b36', level: '初級', title: '一時的に管理人権限を使う', desc: 'sudo を使って id コマンドを実行してください。', expectedCmd: 'sudo id', validator: (c) => /sudo\s+id/.test(c.trim()), completedMsg: 'スーパーパワー！', hint: 'sudo id', explanation: '一時的に管理者権限を代行します。' },
+    { id: 'b37', level: '初級', title: 'ファイルに上書きで保存する', desc: '「Done」という文字を result.txt に書き込んでください。', expectedCmd: 'echo "Done" > result.txt', validator: (c, ctx) => !!ctx?.vfs?.getNode('/home/user/result.txt'), completedMsg: 'リダイレクト成功！', hint: '>', explanation: '「>」は標準出力をファイルへ書き込みます。' },
+    { id: 'b38', level: '初級', title: 'ファイルの一部をもっと詳しく調べる', desc: 'fileコマンドで /etc/passwd が何者か確認してください。', expectedCmd: 'file /etc/passwd', validator: (c) => /file\s+/.test(c.trim()), completedMsg: '正体がわかりました。', hint: 'file', explanation: 'ファイル形式を特定します。' },
+    { id: 'b39', level: '初級', title: 'マニュアルの特定の章を引く', desc: 'manコマンドでlsのページを開いてください。', expectedCmd: 'man ls', validator: (c) => /man\s+ls/.test(c.trim()), completedMsg: '公式ガイドです。', hint: 'man ls', explanation: 'UNIX/Linuxの世界では最も信頼できる一次ソースです。' },
+    { id: 'b40', level: '初級', title: 'シェルを正しく終了する', desc: '現在のSSH接続をexitで終了する準備をしましょう。', expectedCmd: 'exit', validator: (c) => c.trim() === 'exit', completedMsg: 'お疲れ様でした！', hint: 'exit', explanation: 'セッションを切り、ログアウトします。' },
 
-    // --- 中級 (40 tasks) ---
-    { id: 'i1', level: '中級', title: '階層作成', desc: 'mkdir -p を使い a/b/c という多重ディレクトリを作成してください。', expectedCmd: 'mkdir -p a/b/c', validator: (c) => c.trim().replace(/\s+/g, ' ') === 'mkdir -p a/b/c', completedMsg: '深いディレクトリができました。', hint: '-p オプション' },
-    { id: 'i2', level: '中級', title: '複数コピー', desc: 'file1.txt と file2.txt を同時に mydir フォルダへコピーしてください。', expectedCmd: 'cp file1.txt file2.txt mydir/', validator: (c) => /cp\s+file1\.txt\s+file2\.txt\s+mydir\/?/.test(c.trim().replace(/\s+/g, ' ')), completedMsg: 'まとめてコピー！', hint: '引数を並べます。' },
-    { id: 'i3', level: '中級', title: '確認付き移動', desc: '上書き確認を有効にしてファイルを移動してください。', expectedCmd: 'mv -i file.txt target/', validator: (c) => /mv\s+-i\s+file\.txt\s+target\//.test(c.trim()), completedMsg: '安全な移動。', hint: '-i オプション' },
-    { id: 'i4', level: '中級', title: 'フォルダコピー', desc: 'ディレクトリを中身ごと（再帰的に）コピーしてください。', expectedCmd: 'cp -r dir1 dir2', validator: (c) => /cp\s+-r\s+dir1\s+dir2/.test(c.trim()), completedMsg: '丸ごと。', hint: 'Recursive' },
-    { id: 'i5', level: '中級', title: '確認付き削除', desc: '削除前に確認が出るようにファイルを消してください。', expectedCmd: 'rm -i file.txt', validator: (c) => /rm\s+-i\s+file\.txt/.test(c.trim()), completedMsg: '後悔しませんね？', hint: 'Interactive' },
-    { id: 'i6', level: '中級', title: '先頭表示', desc: 'ファイルの冒頭10行を確認してください。', expectedCmd: 'head file.txt', validator: (c) => /head\s+file\.txt/.test(c.trim()), completedMsg: '初めまして。', hint: 'head' },
-    { id: 'i7', level: '中級', title: '末尾表示', desc: 'ファイルの最後10行を確認してください。', expectedCmd: 'tail file.txt', validator: (c) => /tail\s+file\.txt/.test(c.trim()), completedMsg: 'おしまい。', hint: 'tail' },
-    { id: 'i8', level: '中級', title: '検索', desc: 'ファイル内から "error" という文字を検索してください。', expectedCmd: 'grep error log.txt', validator: (c) => /grep\s+error\s+log\.txt/.test(c.trim()), completedMsg: '発見。', hint: 'grep matches' },
-    { id: 'i9', level: '中級', title: '逆検索', desc: '"fix" という文字を含まない行のみ表示してください。', expectedCmd: 'grep -v fix log.txt', validator: (c) => /grep\s+-v\s+fix\s+log\.txt/.test(c.trim()), completedMsg: '除外完了。', hint: '-v オプション' },
-    { id: 'i10', level: '中級', title: 'パーミッション', desc: 'ファイルを「所有者のみ読み書き可能」に変更してください。', expectedCmd: 'chmod 600 private.txt', validator: (c) => /chmod\s+600\s+private\.txt/.test(c.trim()), completedMsg: '秘密厳守。', hint: 'chmod 600' },
-    { id: 'i11', level: '中級', title: '詳細パーミッション', desc: '誰でも読み取り可能、所有者のみ書き込み可能に設定してください。', expectedCmd: 'chmod 644 public.txt', validator: (c) => /chmod\s+644\s+public\.txt/.test(c.trim()), completedMsg: '公開。', hint: 'chmod 644' },
-    { id: 'i12', level: '中級', title: '全プロセス', desc: '実行中の全プロセスを確認してください。', expectedCmd: 'ps aux', validator: (c) => /ps\s+aux/.test(c.trim()), completedMsg: '監視中。', hint: 'ps aux' },
-    { id: 'i13', level: '中級', title: '再帰リスト', desc: 'サブディレクトリも含めたすべてのファイルを一覧表示してください。', expectedCmd: 'ls -R', validator: (c) => /ls\s+-R/.test(c.trim()), completedMsg: '隅々まで。', hint: '-R オプション' },
-    { id: 'i14', level: '中級', title: 'リダイレクト', desc: 'echoの出力を list.txt に保存してください。', expectedCmd: 'echo "test" > list.txt', validator: (c) => /echo\s+.*>\s+list\.txt/.test(c.trim()), completedMsg: '書き込みました。', hint: '> 使用' },
-    { id: 'i15', level: '中級', title: '追記', desc: '既存のファイル log.txt の末尾に "done" を追記してください。', expectedCmd: 'echo "done" >> log.txt', validator: (c) => /echo\s+.*>>\s+log\.txt/.test(c.trim()), completedMsg: '継ぎ足し。', hint: '>> 使用' },
-    { id: 'i16', level: '中級', title: '並び替え', desc: 'ファイル names.txt の内容をアルファベット順に並び替えてください。', expectedCmd: 'sort names.txt', validator: (c) => /sort\s+names\.txt/.test(c.trim()), completedMsg: '整列。', hint: 'sort' },
-    { id: 'i17', level: '中級', title: '重複排除', desc: '連続する重複行を1つにまとめて表示してください。', expectedCmd: 'uniq data.txt', validator: (c) => /uniq\s+data\.txt/.test(c.trim()), completedMsg: 'スッキリ。', hint: 'uniq' },
-    { id: 'i18', level: '中級', title: '行数カウント', desc: 'ファイルの行数を数えてください。', expectedCmd: 'wc -l file.txt', validator: (c) => /wc\s+-l\s+file\.txt/.test(c.trim()), completedMsg: '計上。', hint: 'Word Count' },
-    { id: 'i19', level: '中級', title: '差分確認', desc: 'file1 と file2 の内容の差を表示してください。', expectedCmd: 'diff file1 file2', validator: (c) => /diff\s+file1\s+file2/.test(c.trim()), completedMsg: '間違い探し。', hint: 'diff' },
-    { id: 'i20', level: '中級', title: 'シンボリックリンク', desc: 'original.txt へのショートカット link.txt を作成してください。', expectedCmd: 'ln -s original.txt link.txt', validator: (c) => /ln\s+-s\s+original\.txt\s+link\.txt/.test(c.trim()), completedMsg: '分身。', hint: 'ln -s' },
-    { id: 'i21', level: '中級', title: 'ファイル検索', desc: '現在のフォルダ以下から ".txt" で終わるファイルを検索してください。', expectedCmd: 'find . -name "*.txt"', validator: (c) => /find\s+\.\s+-name\s+["']?\*\.txt["']?/.test(c.trim()), completedMsg: '見つけました。', hint: 'find' },
-    { id: 'i22', level: '中級', title: 'コマンド所在', desc: 'lsコマンドの実体ファイルがどこにあるか調べてください。', expectedCmd: 'which ls', validator: (c) => /which\s+ls/.test(c.trim()), completedMsg: 'そこにあります。', hint: 'which' },
-    { id: 'i23', level: '中級', title: '別名設定', desc: '"ll" と打つと "ls -l" が実行されるように設定してください。', expectedCmd: 'alias ll="ls -l"', validator: (c) => /alias\s+ll=["']ls\s+-l["']/.test(c.trim()), completedMsg: '時短テク。', hint: 'alias' },
-    { id: 'i24', level: '中級', title: '履歴', desc: '過去に実行したコマンドのリストを表示してください。', expectedCmd: 'history', validator: (c) => c.trim() === 'history', completedMsg: '思い出。', hint: 'history' },
-    { id: 'i25', level: '中級', title: '容量確認', desc: '現在のフォルダの使用容量を人間が読める形式で表示してください。', expectedCmd: 'du -sh', validator: (c) => /du\s+-sh/.test(c.trim()), completedMsg: '重い。', hint: 'Disk Usage' },
-    { id: 'i26', level: '中級', title: '空き容量', desc: 'ディスク全体の空き状況を表示してください。', expectedCmd: 'df -h', validator: (c) => /df\s+-h/.test(c.trim()), completedMsg: 'まだまだ入ります。', hint: 'Disk Free' },
-    { id: 'i27', level: '中級', title: 'メモリ', desc: 'メモリの使用状況を表示してください。', expectedCmd: 'free -m', validator: (c) => /free\s+-m/.test(c.trim()), completedMsg: '余裕あり。', hint: 'free' },
-    { id: 'i28', level: '中級', title: 'システム情報', desc: 'カーネルのバージョンなど、システムの詳細を表示してください。', expectedCmd: 'uname -a', validator: (c) => /uname\s+-a/.test(c.trim()), completedMsg: '自己紹介。', hint: 'uname' },
-    { id: 'i29', level: '中級', title: 'ホスト名', desc: 'このマシンのネットワーク上の名前を確認してください。', expectedCmd: 'hostname', validator: (c) => c.trim() === 'hostname', completedMsg: '名乗ります。', hint: 'hostname' },
-    { id: 'i30', level: '中級', title: 'ユーザーID', desc: '現在のユーザーのUIDや所属グループを確認してください。', expectedCmd: 'id', validator: (c) => c.trim() === 'id', completedMsg: '私です。', hint: 'id' },
-    { id: 'i31', level: '中級', title: 'グループ', desc: '自分が所属しているグループ名を表示してください。', expectedCmd: 'groups', validator: (c) => c.trim() === 'groups', completedMsg: '仲間。', hint: 'groups' },
-    { id: 'i32', level: '中級', title: '稼働時間', desc: '起動してからどれくらい経ったか確認してください。', expectedCmd: 'uptime', validator: (c) => c.trim() === 'uptime', completedMsg: '頑張ってます。', hint: 'uptime' },
-    { id: 'i33', level: '中級', title: 'ログイン中', desc: '現在ログインしているユーザーの一覧を見てください。', expectedCmd: 'who', validator: (c) => /^(who|w)$/.test(c.trim()), completedMsg: '誰かいます。', hint: 'who' },
-    { id: 'i34', level: '中級', title: '最新ログイン', desc: '最近ログインした履歴を確認してください。', expectedCmd: 'last', validator: (c) => c.trim() === 'last', completedMsg: '足跡。', hint: 'last' },
-    { id: 'i35', level: '中級', title: 'プロセス監視', desc: 'CPU負荷の高いプロセスをリアルタイムで監視してください。', expectedCmd: 'top', validator: (c) => c.trim() === 'top', completedMsg: '監視！', hint: 'top (qで終了)' },
-    { id: 'i36', level: '中級', title: '変数の設定', desc: '環境変数 MYNAME に "LinuxUser" をセットしてください。', expectedCmd: 'export MYNAME=LinuxUser', validator: (c) => /export\s+MYNAME=LinuxUser/.test(c.trim()), completedMsg: 'セット。', hint: 'export' },
-    { id: 'i37', level: '中級', title: '変数の確認', desc: '環境変数 PATH の中身を表示してください。', expectedCmd: 'echo $PATH', validator: (c) => /echo\s+\$PATH/.test(c.trim()), completedMsg: '道のり。', hint: '$ を前に。' },
-    { id: 'i38', level: '中級', title: '接続確認', desc: 'google.com へ通信が届くか確認してください（数回で止める想定）。', expectedCmd: 'ping -c 4 google.com', validator: (c) => /ping\s+.*google\.com/.test(c.trim()), completedMsg: '応答あり。', hint: 'ping' },
-    { id: 'i39', level: '中級', title: 'URL取得', desc: 'Web上のデータを画面に取得してください。', expectedCmd: 'curl http://example.com', validator: (c) => /curl\s+.*example\.com/.test(c.trim()), completedMsg: 'ダウンロード。', hint: 'curl' },
-    { id: 'i40', level: '中級', title: '環境変数一覧', desc: '現在設定されているすべての環境変数を表示してください。', expectedCmd: 'env', validator: (c) => c.trim() === 'env', completedMsg: 'ズラリ。', hint: 'env' },
+    // --- 中級 (40 tasks: i1 - i40) ---
+    { id: 'i1', level: '中級', title: '階層をまとめて作成する', desc: 'dir1/dir2/dir3 を一気に作ってください。', expectedCmd: 'mkdir -p dir1/dir2/dir3', validator: (c) => /mkdir\s+-p/.test(c.trim()), completedMsg: '中間ディレクトリも作れました。', hint: 'mkdir -p', explanation: '-p オプションは「parents」を一括作成します。' },
+    { id: 'i2', level: '中級', title: 'ディレクトリを中身ごと複製する', desc: 'dir1 を dir1_bak としてコピーしてください。', expectedCmd: 'cp -r dir1 dir1_bak', validator: (c) => /cp\s+.*-r/.test(c.trim()), completedMsg: '再帰コピー成功。', hint: 'cp -r', explanation: 'ディレクトリのコピーには -r が必須です。' },
+    { id: 'i3', level: '中級', title: '再帰的に強制削除を実行する', desc: 'dir1_bak を中身ごと、確認なしで消してください。', expectedCmd: 'rm -rf dir1_bak', validator: (c) => /rm\s+.*-rf/.test(c.trim()), completedMsg: '消滅しました。', hint: 'rm -rf', explanation: '危険ですが、掃除にはよく使われるコマンドです。' },
+    { id: 'i4', level: '中級', title: '特定の単語を含む行を抜き出す', desc: '/etc/passwd から「user」を含む行を探してください。', expectedCmd: 'grep user /etc/passwd', validator: (c) => /grep\s+user/.test(c.trim()), completedMsg: '発見！', hint: 'grep', explanation: '文字列検索の基本。' },
+    { id: 'i5', level: '中級', title: 'ファイルの権限を数字で指定する', desc: 'test.html を誰でも読み込める（644）にしてください。', expectedCmd: 'chmod 644 test.html', validator: (c) => /chmod\s+644/.test(c.trim()), completedMsg: '一般的な公開設定です。', hint: 'chmod 644', explanation: 'オーナーは読み書き、他人は読み取りのみ。' },
+    { id: 'i6', level: '中級', title: 'ファイルの所有者を変更する', desc: 'ファイルの持ち主を「root」に変えてみましょう（sudoが必要）。', expectedCmd: 'sudo chown root test.html', validator: (c) => /chown/.test(c.trim()), completedMsg: '持ち主が変わりました。', hint: 'chown', explanation: 'Change Ownerコマンドです。' },
+    { id: 'i7', level: '中級', title: 'シンボリックリンクを作成する', desc: '元のファイルを指し示す「link.txt」を作成してください。', expectedCmd: 'ln -s origin.txt link.txt', validator: (c) => /ln\s+-s/.test(c.trim()), completedMsg: '別名リンク完了。', hint: 'ln -s', explanation: '実体は一つで、名前が複数ある状態です。' },
+    { id: 'i8', level: '中級', title: 'ハードリンクを作成する', desc: '実体への参照（ハードリンク）を作成してください。', expectedCmd: 'ln fileA fileB', validator: (c) => /^ln\s+[^s]/.test(c.trim()), completedMsg: '実体を共有しました。', hint: 'ln', explanation: '同じinodeを共有します。' },
+    { id: 'i9', level: '中級', title: 'ディスクの使用状況を集計する', desc: '今のディレクトリがどれくらい容量を喰っているか表示してください。', expectedCmd: 'du -sh', validator: (c) => /du\s+.*-sh/.test(c.trim()), completedMsg: '計測完了。', hint: 'du -sh', explanation: 'Disk Usageの要約表示。' },
+    { id: 'i10', level: '中級', title: 'ネットワーク疎通を確認する', desc: 'google.com まで信号が届くか確認してください。', expectedCmd: 'ping -c 3 google.com', validator: (c) => /ping/.test(c.trim()), completedMsg: '応答を確認しました。', hint: 'ping', explanation: '接続確認の王道。' },
+    { id: 'i11', level: '中級', title: 'IPアドレスを表示する（推奨形式）', desc: 'ipコマンドを使って住所を確認してください。', expectedCmd: 'ip addr', validator: (c) => /ip\s+addr/.test(c.trim()), completedMsg: '確認成功。', hint: 'ip addr', explanation: 'ifconfigに代わる現代的なツールです。' },
+    { id: 'i12', level: '中級', title: 'プロセスを名前で検索して絞り込む', desc: '「ssh」という文字列を含むプロセスのみ表示してください。', expectedCmd: 'ps aux | grep ssh', validator: (c) => /ps.*grep/.test(c.trim()), completedMsg: '対象を見つけました！', hint: 'ps aux | grep', explanation: 'パイプの真骨頂です。' },
+    { id: 'i13', level: '中級', title: '実行中のプログラムを強制停止させる', desc: 'プロセスに終了シグナルを送ってください。', expectedCmd: 'kill 1234', validator: (c) => /kill/.test(c.trim()), completedMsg: '信号を送りました。', hint: 'kill', explanation: 'プロセスを終了させます。' },
+    { id: 'i14', level: '中級', title: '動的なリソース監視を開始する', desc: 'topを起動して負荷を確認してください。', expectedCmd: 'top', validator: (c) => c.trim() === 'top', completedMsg: '監視中……', hint: 'top', explanation: '情報の更新し続けるモニタです。' },
+    { id: 'i15', level: '中級', title: '条件に合うファイルを検索して探す', desc: '名前に「config」が含まれるファイルを検索してください。', expectedCmd: 'find . -name "*config*"', validator: (c) => /find.*-name/.test(c.trim()), completedMsg: '発見できましたね。', hint: 'find', explanation: '高度な検索ツールです。' },
+    { id: 'i16', level: '中級', title: 'ファイルの差分内容を詳しく見る', desc: 'diffコマンドを試してください。', expectedCmd: 'diff a.txt b.txt', validator: (c) => /diff/.test(c.trim()), completedMsg: '違いが出ました。', hint: 'diff', explanation: 'どこが違うかの比較です。' },
+    { id: 'i17', level: '中級', title: 'DNSの情報を問い合わせる', desc: 'ホスト名からIPアドレスを引いてみましょう。', expectedCmd: 'dig google.com', validator: (c) => /dig|nslookup/.test(c.trim()), completedMsg: 'DNSが答えました。', hint: 'dig', explanation: 'ドメインの正体を探ります。' },
+    { id: 'i18', level: '中級', title: 'ファイルを圧縮して容量を節約する', desc: 'gzip でファイルを圧縮してください。', expectedCmd: 'gzip data.ext', validator: (c) => /gzip/.test(c.trim()), completedMsg: 'ダイエット成功。', hint: 'gzip', explanation: '圧縮してアーカイブしやすくします。' },
+    { id: 'i19', level: '中級', title: '圧縮ファイルを元に戻す', desc: 'gunzip で解凍してください。', expectedCmd: 'gunzip data.ext.gz', validator: (c) => /gunzip/.test(c.trim()), completedMsg: '元通り！', hint: 'gunzip', explanation: '解凍です。' },
+    { id: 'i20', level: '中級', title: 'アーカイブファイルを作成する', desc: 'tarコマンドでファイルをまとめてください。', expectedCmd: 'tar -cvf backup.tar work/', validator: (c) => /tar\s+-cvf/.test(c.trim()), completedMsg: 'パック詰め完了。', hint: 'tar -cvf', explanation: '複数のファイルを一つに。' },
+    { id: 'i21', level: '中級', title: 'アーカイブを現在の場所に展開する', desc: 'tarファイルをバラして中身を取り出してください。', expectedCmd: 'tar -xvf backup.tar', validator: (c) => /tar\s+-xvf/.test(c.trim()), completedMsg: '取り出し成功。', hint: 'tar -xvf', explanation: '展開作業です。' },
+    { id: 'i22', level: '中級', title: '特定の文字列を除外して表示する', desc: 'grepの除外検索（-v）を使ってください。', expectedCmd: 'grep -v "error" log.txt', validator: (c) => /grep\s+-v/.test(c.trim()), completedMsg: 'ノイズが消えました。', hint: 'grep -v', explanation: '逆マッチです。' },
+    { id: 'i23', level: '中級', title: 'ファイル内の重複行を一つにまとめる', desc: 'あらかじめソートされたファイルの重複を消してください。', expectedCmd: 'uniq data.txt', validator: (c) => /uniq/.test(c.trim()), completedMsg: 'スッキリしました。', hint: 'uniq', explanation: 'ユニークな行だけを取り出します。' },
+    { id: 'i24', level: '中級', title: '指定した列のデータだけを抽出する', desc: 'awk を使って情報の1列目を抜き出してください。', expectedCmd: 'cat file.csv | awk \'{print $1}\'', validator: (c) => /awk/.test(c.trim()), completedMsg: '抜き出し成功。', hint: 'awk', explanation: 'テキスト処理の言語です。' },
+    { id: 'i25', level: '中級', title: '文字列のパターンを置換する', desc: 'sed で「old」を「new」に変えて表示してください。', expectedCmd: 'echo old | sed "s/old/new/"', validator: (c) => /sed/.test(c.trim()), completedMsg: '化けましたね！', hint: 'sed', explanation: '流れる文字列を編集します。' },
+    { id: 'i26', level: '中級', title: 'URLからデータが取得できるかテストする', desc: 'curl でレスポンスを表示してください。', expectedCmd: 'curl http://localhost', validator: (c) => /curl/.test(c.trim()), completedMsg: '返事が来ました。', hint: 'curl', explanation: 'Webリクエストです。' },
+    { id: 'i27', level: '中級', title: '現在のジョブを一時中断する', desc: 'Ctrl+Z に相当する操作を意識してください。', expectedCmd: '^Z', validator: (c) => true, completedMsg: '停止しました。', hint: 'Ctrl+Z', explanation: '仕事を途中で待機させます。' },
+    { id: 'i28', level: '中級', title: 'バックグラウンドで処理を再開させる', desc: 'bg コマンドを叩いてください。', expectedCmd: 'bg', validator: (c) => c.trim() === 'bg', completedMsg: '見えない所で動いています。', hint: 'bg', explanation: '背後でジョブを続けます。' },
+    { id: 'i29', level: '中級', title: 'ジョブをフォアグラウンドに戻す', desc: 'fg コマンドで目の前に戻してください。', expectedCmd: 'fg', validator: (c) => c.trim() === 'fg', completedMsg: 'おかえり！', hint: 'fg', explanation: '目の前に持ってきます。' },
+    { id: 'i30', level: '中級', title: '現在動いているジョブを知る', desc: 'jobs コマンドを実行してください。', expectedCmd: 'jobs', validator: (c) => c.trim() === 'jobs', completedMsg: 'リストアップ完了。', hint: 'jobs', explanation: '管理下の仕事一覧。' },
+    { id: 'i31', level: '中級', title: 'サーバーの詳細なパスワード情報を確認する', desc: 'sudo chage -l user を試してください。', expectedCmd: 'sudo chage -l user', validator: (c) => /chage/.test(c.trim()), completedMsg: '有効期限がわかりました。', hint: 'chage', explanation: 'セキュリティ管理の一部。' },
+    { id: 'i32', level: '中級', title: '自分の所属グループを表示する', desc: 'id コマンドでもっと詳しく見てみましょう。', expectedCmd: 'id', validator: (c) => c.trim() === 'id', completedMsg: '詳細な属性です。', hint: 'id', explanation: 'UID, GIDの全表示。' },
+    { id: 'i33', level: '中級', title: 'エイリアスの設定を解除する', desc: 'unalias ll を実行してください。', expectedCmd: 'unalias ll', validator: (c) => /unalias/.test(c.trim()), completedMsg: '解除完了。', hint: 'unalias', explanation: '別名を消します。' },
+    { id: 'i34', level: '中級', title: '新しい環境変数をエクスポートする', desc: 'export 変数名=値 を行ってください。', expectedCmd: 'export MY_VAL=100', validator: (c) => /export/.test(c.trim()), completedMsg: 'グローバル化。', hint: 'export', explanation: '環境全体へ。' },
+    { id: 'i35', level: '中級', title: 'ファイルに内容を追記する', desc: '「>>」を使って書き足してください。', expectedCmd: 'echo "extra" >> file.txt', validator: (c) => />>/.test(c.trim()), completedMsg: '足されました。', hint: '>>', explanation: '末尾への追加。' },
+    { id: 'i36', level: '中級', title: 'ファイルのinodeを確認する', desc: 'ls -i で番号を見てください。', expectedCmd: 'ls -i', validator: (c) => /ls\s+.*-i/.test(c.trim()), completedMsg: '識別番号です。', hint: 'ls -i', explanation: '物理的な位置を示すID。' },
+    { id: 'i37', level: '中級', title: '出力の結果を変数に代入する', desc: 'NOW=$(date) を実行してください。', expectedCmd: 'NOW=$(date)', validator: (c) => /=\$\(date\)/.test(c.trim()), completedMsg: '記録されました。', hint: '$(command)', explanation: 'コマンドの結果を変数へ。' },
+    { id: 'i38', level: '中級', title: '一時ファイルを安全に作る準備', desc: 'mktemp を打ってみてください。', expectedCmd: 'mktemp', validator: (c) => /mktemp/.test(c.trim()), completedMsg: '場所の予約です。', hint: 'mktemp', explanation: '衝突しない一時ファイル名。' },
+    { id: 'i39', level: '中級', title: '別名実行を確認する', desc: '設定したエイリアスを使ってみてください。', expectedCmd: 'll', validator: (c) => c.trim() === 'll', completedMsg: '快調ですね。', hint: 'll', explanation: 'ショートカットの確認。' },
+    { id: 'i40', level: '中級', title: 'パスワード変更手順を試す', desc: 'passwd を入力（実行までは不要）してください。', expectedCmd: 'passwd', validator: (c) => c.trim() === 'passwd', completedMsg: '確認完了。', hint: 'passwd', explanation: 'セキュリティ意識の向上。' },
 
     // --- 上級 (40 tasks) ---
     { id: 'a1', level: '上級', title: 'パイプ連携', desc: 'lsの出力をgrepに渡し、"txt"が含まれる行だけ抽出してください。', expectedCmd: 'ls | grep txt', validator: (c) => c.trim().replace(/\s+/g, ' ') === 'ls | grep txt', completedMsg: '繋がる力。', hint: '| 使用' },
@@ -183,7 +166,7 @@ export const generateTrainingTasks = (sshHost: string, sshUser: string, sshPort:
     { id: 'a39', level: '上級', title: '重複なし結合', desc: '2つのファイルを合体させ、重複行を消して表示してください。', expectedCmd: 'cat f1 f2 | sort | uniq', validator: (c) => /cat\s+.*\s*\|\s*sort\s*\|\s*uniq/.test(c.trim()), completedMsg: '融合。', hint: 'cat sort uniq' },
     { id: 'a40', level: '上級', title: '全ルート', desc: 'rootユーザー（管理者）に切り替えてください。', expectedCmd: 'sudo su -', validator: (c) => /sudo\s+(su|sh|bash)/.test(c.trim()), completedMsg: '万能感。', hint: 'sudo su' },
 
-    // --- エキスパート (20 tasks) ---
+    // --- エキスパート (24 tasks: e1 - e24) ---
     { id: 'e1', level: 'エキスパート', title: 'プロセスツリー', desc: 'プロセスを親子関係のツリー状で表示してください。', expectedCmd: 'ps auxf', validator: (c) => /ps\s+.*f/.test(c.trim()), completedMsg: '家系図。', hint: 'ps auxf' },
     { id: 'e2', level: 'エキスパート', title: '一括置換', desc: '現在のフォルダの全 .txt ファイル内の "old" を "new" に一括置換してください。', expectedCmd: "sed -i 's/old/new/g' *.txt", validator: (c) => /sed\s+-i/.test(c.trim()), completedMsg: '一網打尽。', hint: 'sed -i' },
     { id: 'e3', level: 'エキスパート', title: '容量ワースト', desc: 'ファイルサイズが大きい順にトップ5を表示してください。', expectedCmd: 'ls -lS | head -n 6', validator: (c) => /ls\s+.*S/.test(c.trim()), completedMsg: 'メタボ発見。', hint: 'ls -S' },
@@ -210,5 +193,5 @@ export const generateTrainingTasks = (sshHost: string, sshUser: string, sshPort:
     { id: 'e24', level: 'エキスパート', title: '設定ファイル確認', desc: 'SSHのクライアント設定ファイル(~/.ssh/config)の内容を確認してください。', expectedCmd: 'cat ~/.ssh/config', validator: (c) => /cat\s+.*\.ssh\/config/.test(c.trim()), completedMsg: '構成確認。', hint: '~/.ssh/config' },
   ];
 
-  return tasks.map(t => ({ ...t, validator: t.validator || ((c: string) => aiValidator(t, c)) }));
+  return tasks;
 };

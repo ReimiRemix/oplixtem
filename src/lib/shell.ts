@@ -250,6 +250,37 @@ export class Shell {
         case 'strings':
           result = '/lib64/ld-linux-x86-64.so.2\n__libc_start_main\nGLIBC_2.2.5\n...';
           break;
+        case 'mktemp':
+          const tmpName = `/tmp/tmp.${Math.random().toString(36).substring(2, 10)}`;
+          this.vfs.touch(tmpName);
+          result = tmpName;
+          break;
+        case 'uuidgen':
+          result = '550e8400-e29b-41d4-a716-446655440000';
+          break;
+        case 'chattr':
+        case 'lsattr':
+          result = `--------------e---- ${args[args.length - 1] || '.'}`;
+          break;
+        case 'nice':
+          result = args.length > 0 ? (args[0].startsWith('-n') ? this.executeSingle(args.slice(2).join(' ')) : this.executeSingle(args.slice(1).join(' '))) : '';
+          break;
+        case 'renice':
+          result = `PID ${args[args.length - 1]}: old priority 0, new priority ${args[args.indexOf('-n') + 1] || '10'}`;
+          break;
+        case 'sysctl':
+          if (args[0]?.includes('=')) result = args[0];
+          else result = 'net.ipv4.ip_forward = 0';
+          break;
+        case 'objdump':
+          result = '0000000000001000 <main>:\n  1000: 55                    push   %rbp\n  1001: 48 89 e5              mov    %rsp,%rbp\n  1004: bf 00 20 00 00        mov    $0x2000,%edi\n  1009: e8 f2 ff ff ff        callq  1000 <main+0x0>';
+          break;
+        case 'rename':
+          result = '';
+          break;
+        case 'declare':
+          result = 'declare -f hello\nhello () \n{\n    echo "hi"\n}';
+          break;
         case 'source':
         case '.':
           result = '';
@@ -562,6 +593,8 @@ MiB Swap:   2048.0 total,   2048.0 free,      0.0 used.   5480.9 avail Mem
     let listFormat = false;
     let recursive = false;
     let sortBySize = false;
+    let sortByTime = false;
+    let humanReadable = false;
     let targets: string[] = [];
 
     for (const arg of args) {
@@ -572,6 +605,8 @@ MiB Swap:   2048.0 total,   2048.0 free,      0.0 used.   5480.9 avail Mem
           else if (char === 'l') listFormat = true;
           else if (char === 'R') recursive = true;
           else if (char === 'S') sortBySize = true;
+          else if (char === 't') sortByTime = true;
+          else if (char === 'h') humanReadable = true;
           else return `ls: invalid option -- '${char}'\nTry 'ls --help' for more information.`;
         }
       } else {
@@ -594,7 +629,8 @@ MiB Swap:   2048.0 total,   2048.0 free,      0.0 used.   5480.9 avail Mem
 
       if (node.type === 'file') {
          if (listFormat) {
-            output.push(`${node.permissions} 1 ${node.owner} ${node.group} ${node.size} ${node.updatedAt.toDateString()} ${node.name}`);
+            const size = humanReadable ? this.formatSize(node.size) : node.size.toString();
+            output.push(`${node.permissions} 1 ${node.owner} ${node.group} ${size.padStart(5)} ${node.updatedAt.toDateString()} ${node.name}`);
          } else {
             output.push(node.name);
          }
@@ -608,7 +644,10 @@ MiB Swap:   2048.0 total,   2048.0 free,      0.0 used.   5480.9 avail Mem
       let children = Object.values(node.children || {}).sort((a, b) => a.name.localeCompare(b.name));
       if (sortBySize) {
           children = [...children].sort((a, b) => b.size - a.size);
+      } else if (sortByTime) {
+          children = [...children].sort((a, b) => b.updatedAt.getTime() - a.updatedAt.getTime());
       }
+
       let items = children;
       if (!showHidden) {
           items = items.filter(n => !n.name.startsWith('.'));
@@ -623,10 +662,11 @@ MiB Swap:   2048.0 total,   2048.0 free,      0.0 used.   5480.9 avail Mem
           let total = 0;
           let lsLines: string[] = [];
           for (const item of items) {
-             lsLines.push(`${item.permissions} ${item.type === 'dir' ? 2 : 1} ${item.owner} ${item.group} ${item.size} ${item.updatedAt.toLocaleString('en-US',{month:'short', day:'2-digit'})} ${item.updatedAt.getHours().toString().padStart(2,'0')}:${item.updatedAt.getMinutes().toString().padStart(2,'0')} ${item.name}`);
+             const size = humanReadable ? this.formatSize(item.size) : item.size.toString();
+             lsLines.push(`${item.permissions} ${item.type === 'dir' ? 2 : 1} ${item.owner} ${item.group} ${size.padStart(5)} ${item.updatedAt.toLocaleString('en-US',{month:'short', day:'2-digit'})} ${item.updatedAt.getHours().toString().padStart(2,'0')}:${item.updatedAt.getMinutes().toString().padStart(2,'0')} ${item.name}`);
              total += Math.ceil(item.size / 4096) * 4;
           }
-          output.push(`total ${total}\ntotal items\n` + lsLines.join('\n'));
+          output.push(`total ${total}\n` + lsLines.join('\n'));
       } else {
          const isDir = (n: any) => n.type === 'dir';
          output.push(items.map(n => isDir(n) ? `\x1b[1;34m${n.name}\x1b[0m` : n.name).join('  '));
@@ -646,6 +686,14 @@ MiB Swap:   2048.0 total,   2048.0 free,      0.0 used.   5480.9 avail Mem
     }
 
     return output.join('\n');
+  }
+
+  formatSize(bytes: number): string {
+    if (bytes === 0) return '0B';
+    const k = 1024;
+    const sizes = ['B', 'K', 'M', 'G', 'T'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + sizes[i];
   }
 
   find(args: string[]): string {

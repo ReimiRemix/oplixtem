@@ -246,32 +246,14 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
         setTimeout(() => {
           setStatus('Connected');
           term.writeln('\x1b[32m[トレーニングサーバーにSSH接続されました]\x1b[0m');
-          term.write(`\r\n\x1b[35m${config.username || 'user'}@${config.host}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
+          const finalHost = config.host === 'sandbox-vm.linux.local' ? '172.16.158.107' : config.host;
+          const finalUser = config.username === 'penguin' ? 'user' : config.username;
+          term.write(`\r\n\x1b[35m${finalUser || 'user'}@${finalHost}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ `);
           
           if (commandExecRef.current) {
-             let isValid = false;
-             let reasonStr = '';
-             if (currentTask && currentTask.validator) {
-                 // The validator for b1 will return true if config matches
-                 Promise.resolve(currentTask.validator('ssh', config || undefined)).then(res => {
-                     if (typeof res === 'object' && res !== null) {
-                         isValid = res.valid;
-                         reasonStr = res.reason || '';
-                     } else {
-                         isValid = !!res;
-                     }
-                     if (!isValid) {
-                         term.writeln('\x1b[31mエラー: 指定された接続先(Host/User)が課題と一致しません。\x1b[0m');
-                         if (reasonStr) term.writeln(`\x1b[31m理由: ${reasonStr}\x1b[0m`);
-                         term.writeln('\x1b[33m自動的に切断します。「Connect」からやり直してください。\x1b[0m');
-                         setTimeout(() => {
-                             if (onDisconnect) onDisconnect();
-                         }, 2000);
-                     }
-                     commandExecRef.current!('ssh', isValid);
-                 });
-             } else {
-                 commandExecRef.current('ssh', false);
+             // Simply mark connection as OK if the first task is SSH login
+             if (currentTaskRef.current?.id === 'b1') {
+                commandExecRef.current('ssh', true);
              }
           }
         }, 1000);
@@ -309,24 +291,16 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
                  if (shellOutput.includes('command not found')) {
                      isValid = false;
                  } else if (activeTask.validator) {
-                    const res = await activeTask.validator(norm, config || undefined);
-                    // Provide the VFS state to validator if needed later, but standard checking first:
-                    if (typeof res === 'object' && res !== null) {
-                        isValid = res.valid;
-                    } else {
-                        isValid = !!res;
-                    }
-                    
-                    // Specific validators overridden by VFS outcomes
-                    if (activeTask.id === 'b10') isValid = norm.startsWith('touch') && !!vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'file.txt'));
-                    if (activeTask.id === 'b11') isValid = norm.startsWith('mkdir') && !!vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'newdir'));
-                    if (activeTask.id === 'b12') isValid = norm.startsWith('cp') && !!vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'copy_file.txt'));
-                    if (activeTask.id === 'b13') isValid = norm.startsWith('mv') && !!vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'renamed_file.txt'));
-                    if (activeTask.id === 'b14') isValid = norm.startsWith('rm') && !vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'renamed_file.txt'));
-                    if (activeTask.id === 'b15') isValid = (norm.startsWith('rmdir') || (norm.startsWith('rm') && norm.includes('-r'))) && !vfsRef.current.getNode(vfsRef.current.resolvePath(shellRef.current.pwd(), 'newdir'));
-                    if (activeTask.id === 'b6') isValid = norm.startsWith('cd') && shellRef.current.pwd() === '/etc';
-                    if (activeTask.id === 'b7') isValid = norm.startsWith('cd') && shellRef.current.pwd() === '/';
-                    if (activeTask.id === 'b8') isValid = /^cd(\s+~)?$/.test(norm) && shellRef.current.pwd() === '/home/user';
+                     const res = await activeTask.validator(norm, { 
+                         vfs: vfsRef.current, 
+                         shell: shellRef.current,
+                         config
+                     });
+                     if (typeof res === 'object' && res !== null) {
+                         isValid = res.valid;
+                     } else {
+                         isValid = !!res;
+                     }
                  } else {
                     isValid = norm === activeTask.expectedCmd;
                  }
@@ -391,7 +365,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
            const pHost = ssh ? ssh.host : config.host;
            term.write(`\x1b[35m${pUser}@${pHost}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${currentLine}`);
         } else if (char === '\t') { // Tab
-           const commands = ['pwd', 'cd', 'ls', 'cat', 'touch', 'mkdir', 'cp', 'mv', 'rm', 'rmdir', 'chmod', 'chown', 'grep', 'ps', 'top', 'whoami', 'uname', 'hostname', 'id', 'who', 'w', 'df', 'free', 'echo', 'uptime', 'history', 'clear', 'date', 'cal', 'man', 'ssh', 'sudo', 'systemctl', 'ip', 'dig', 'tar', 'sed', 'awk', 'tr', 'find', 'which', 'alias', 'bg', 'fg', 'jobs', 'kill', 'ping', 'curl', 'env', 'passwd', 'read', 'lsattr', 'chattr', 'split', 'dmesg', 'mount', 'strings', 'nmap', 'traceroute', 'tcpdump', 'strace', 'ulimit', 'chsh', 'ntpdate', 'iostat', 'sar', 'fallocate'];
+           const commands = ['pwd', 'cd', 'ls', 'cat', 'touch', 'mkdir', 'cp', 'mv', 'rm', 'rmdir', 'chmod', 'chown', 'grep', 'ps', 'top', 'whoami', 'uname', 'hostname', 'id', 'who', 'w', 'df', 'free', 'echo', 'uptime', 'history', 'clear', 'date', 'cal', 'man', 'ssh', 'sudo', 'systemctl', 'ip', 'dig', 'tar', 'sed', 'awk', 'tr', 'find', 'which', 'alias', 'bg', 'fg', 'jobs', 'kill', 'ping', 'curl', 'env', 'passwd', 'read', 'lsattr', 'chattr', 'split', 'dmesg', 'mount', 'strings', 'nmap', 'traceroute', 'tcpdump', 'strace', 'ulimit', 'chsh', 'ntpdate', 'iostat', 'sar', 'fallocate', 'mktemp', 'uuidgen', 'nice', 'renice', 'sysctl', 'objdump', 'rename', 'declare'];
            
            const parts = currentLine.split(' ');
            if (parts.length === 1) { // Command completion

@@ -8,9 +8,9 @@ export default function App() {
   const [activeConfig, setActiveConfig] = useState<ConnectConfig | null>(null);
   
   // Connection Form State
-  const [sshHost, setSshHost] = useState('');
-  const [sshUser, setSshUser] = useState('');
-  const [sshPass, setSshPass] = useState('');
+  const [sshHost, setSshHost] = useState(initialSshHost);
+  const [sshUser, setSshUser] = useState(initialSshUser);
+  const [sshPass, setSshPass] = useState('password');
   const [sshPort, setSshPort] = useState('22');
   const [authMethod, setAuthMethod] = useState<'password' | 'key'>('password');
   const [sshKey, setSshKey] = useState('');
@@ -90,11 +90,48 @@ export default function App() {
   const [newTargetHost, setNewTargetHost] = useState('localhost');
   const [newTargetPort, setNewTargetPort] = useState(80);
 
+  const [showResetConfirm, setShowResetConfirm] = useState(false);
+
   // Training Tasks State
-  const [tasks, setTasks] = useState<TrainingTask[]>(() => generateTrainingTasks(initialSshHost, initialSshUser, '22'));
-  const [currentTaskIndex, setCurrentTaskIndex] = useState(0);
-  const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(new Set());
+  const [tasks, setTasks] = useState<TrainingTask[]>(() => generateTrainingTasks(initialSshHost, initialSshUser));
+  const [completedTaskIds, setCompletedTaskIds] = useState<Set<string>>(() => {
+    const saved = localStorage.getItem('oplix-completed-tasks');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        if (Array.isArray(parsed)) return new Set(parsed);
+      } catch (e) {}
+    }
+    return new Set();
+  });
+
+  const [currentTaskIndex, setCurrentTaskIndex] = useState(() => {
+    const saved = localStorage.getItem('oplix-completed-tasks');
+    if (saved) {
+      try {
+        const parsed = JSON.parse(saved);
+        const completed = new Set(parsed);
+        const tasks = generateTrainingTasks(initialSshHost, initialSshUser);
+        const firstIncomplete = tasks.findIndex(t => !completed.has(t.id));
+        return firstIncomplete === -1 ? 0 : firstIncomplete;
+      } catch (e) {}
+    }
+    return 0;
+  });
   
+  useEffect(() => {
+    localStorage.setItem('oplix-completed-tasks', JSON.stringify(Array.from(completedTaskIds)));
+  }, [completedTaskIds]);
+
+  const handleResetTasks = () => {
+    setCompletedTaskIds(new Set());
+    setCurrentTaskIndex(0);
+    localStorage.removeItem('oplix-completed-tasks');
+    // Also re-generate tasks to ensure everything is fresh
+    setTasks(generateTrainingTasks(initialSshHost, initialSshUser));
+    setShowResetConfirm(false);
+  };
+
   useEffect(() => {
     const task = tasks[currentTaskIndex];
     if (task) {
@@ -354,11 +391,25 @@ export default function App() {
 
         {/* Sidebar (Training Tasks) */}
         <div className={`w-full md:w-80 bg-[#252526] md:border-r border-[#3d3d3d] flex-col shrink-0 md:relative z-20 flex-1 md:flex-initial min-h-0 ${showTasksMobile ? 'flex' : 'hidden md:flex'}`}>
-          <div className="p-3 text-[10px] font-bold text-[#888] uppercase tracking-wider border-b border-[#3d3d3d] flex justify-between items-center bg-[#1e1e1e]">
+          <div className="p-4 text-[10px] font-bold text-[#888] uppercase tracking-wider border-b border-[#3d3d3d] flex justify-between items-center bg-[#1e2227]">
              <span className="flex items-center gap-2"><span className="text-xl">🐧</span> トレーニングタスク</span>
-             <span className="text-[#4a9eff]">{currentTaskIndex + 1}/{tasks.length}</span>
+             <div className="flex items-center gap-2">
+               <span className="text-[#4a9eff] font-mono text-xs">{completedTaskIds.size}/{tasks.length}</span>
+               <button 
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  setShowResetConfirm(true);
+                }}
+                className="bg-[#2d333b] hover:bg-red-500/20 text-[#888] hover:text-red-400 w-8 h-8 rounded-md flex items-center justify-center transition-all active:scale-90 border border-[#3d3d3d]"
+                title="進捗をリセット"
+                aria-label="Reset Progress"
+               >
+                 <span className="text-sm">🔄</span>
+               </button>
+             </div>
           </div>
-          <div className="flex-1 overflow-y-auto p-4 space-y-6 min-h-0">
+          <div className="flex-1 overflow-y-auto overflow-x-hidden p-4 space-y-6 touch-pan-y" style={{ WebkitOverflowScrolling: 'touch' }}>
             {['初級', '中級', '上級', 'エキスパート'].map((level) => {
                const levelTasks = tasks.filter(t => t.level === level);
                if (levelTasks.length === 0) return null;
@@ -373,32 +424,53 @@ export default function App() {
                         const isCompleted = completedTaskIds.has(task.id);
                         
                         return (
-                          <div key={task.id} id={`task-${task.id}`} onClick={() => setCurrentTaskIndex(i)} className={`cursor-pointer p-4 rounded border ${isCompleted ? 'bg-[#1e1e1e] border-[#3d3d3d] opacity-60' : isCurrent ? 'bg-[#2d2d2d] border-[#4a9eff] shadow-[0_0_10px_rgba(74,158,255,0.1)]' : 'bg-[#252526] border-[#3d3d3d]'} group flex flex-col gap-2 transition-colors`}>
-                            <div className="flex items-start justify-between gap-2">
-                              <div className={`text-[12px] font-bold ${isCompleted ? 'text-[#888]' : isCurrent ? 'text-[#4a9eff]' : 'text-[#666]'}`}>{task.title}</div>
-                              <div className={`w-4 h-4 rounded-full shrink-0 border flex items-center justify-center ${isCompleted ? 'bg-green-500 border-green-600 text-white text-[10px]' : isCurrent ? 'border-[#4a9eff] bg-[#1e1e1e]' : 'border-[#444] bg-[#1e1e1e]'} font-bold`}>{isCompleted ? '✓' : ''}</div>
+                          <div key={task.id} id={`task-${task.id}`} onClick={() => setCurrentTaskIndex(i)} className={`cursor-pointer p-4 rounded-lg border ${isCompleted ? 'bg-[#1e2227] border-[#30363d] opacity-60' : isCurrent ? 'bg-[#2d333b] border-[#4866b5] shadow-[0_0_15px_rgba(72,102,181,0.15)]' : 'bg-[#161b22] border-[#30363d]'} group flex flex-col gap-3 transition-all duration-200 hover:border-[#444]`}>
+                            <div className="flex items-start justify-between gap-3">
+                              <div className="flex flex-col gap-1">
+                                <div className={`text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded w-fit ${
+                                  task.level === '初級' ? 'bg-emerald-500/10 text-emerald-500' :
+                                  task.level === '中級' ? 'bg-blue-500/10 text-blue-500' :
+                                  task.level === '上級' ? 'bg-orange-500/10 text-orange-500' :
+                                  'bg-red-500/10 text-red-500'
+                                }`}>{task.level}</div>
+                                <div className={`text-[13px] font-bold leading-tight ${isCompleted ? 'text-[#8b949e]' : isCurrent ? 'text-[#e6edf3]' : 'text-[#c9d1d9]'}`}>{task.title}</div>
+                              </div>
+                              <div className={`w-5 h-5 rounded-full shrink-0 border flex items-center justify-center ${isCompleted ? 'bg-[#238636] border-[#2ea043] text-white text-[11px]' : isCurrent ? 'border-[#4866b5] bg-[#0d1117]' : 'border-[#30363d] bg-[#0d1117]'} font-bold`}>{isCompleted ? '✓' : ''}</div>
                             </div>
                             
                             {(isCurrent || !isCompleted) && (
-                               <div className="flex flex-col gap-2">
-                                 <div className={`text-[11px] leading-relaxed whitespace-pre-wrap ${isCurrent ? 'text-[#ccc]' : 'text-[#777]'}`}>{task.desc}</div>
+                               <div className="flex flex-col gap-3">
+                                 <div className={`text-[12px] leading-relaxed whitespace-pre-wrap ${isCurrent ? 'text-[#c9d1d9]' : 'text-[#8b949e]'}`}>{task.desc}</div>
                                  {isCurrent && task.hint && (
-                                   <div className="mt-1 p-2 bg-[#1e293b] border border-[#334155] rounded text-[10px] text-[#94a3b8]">
-                                     <span className="font-bold text-[#38bdf8]">💡 ヒント: </span>
-                                     {task.hint}
+                                   <div className="mt-1 p-3 bg-[#111] border border-[#333] rounded-md text-[11px] text-[#58a6ff] flex items-start gap-2 shadow-inner">
+                                     <span className="shrink-0">💡</span>
+                                     <span className="font-medium">{task.hint}</span>
                                    </div>
                                  )}
                                </div>
                             )}
                             
                             {isCurrent && isCompleted && (
-                               <div className="mt-3 p-3 bg-[#1e1e1e] border border-green-500/50 rounded flex flex-col gap-3">
-                                  <div className="text-[11px] text-green-400 font-medium">{task.completedMsg}</div>
+                               <div className="mt-2 p-4 bg-[#1a7f37]/5 border border-[#1a7f37]/30 rounded-lg flex flex-col gap-4">
+                                  <div className="flex items-center gap-2">
+                                     <div className="text-[14px] text-[#3fb950] font-bold">🎉 {task.completedMsg}</div>
+                                  </div>
+                                  
+                                  {task.explanation && (
+                                    <div className="p-4 bg-[#0d1117] rounded-md border border-[#30363d] space-y-3">
+                                      <div className="text-[10px] font-bold text-[#8b949e] uppercase tracking-wider border-b border-[#30363d] pb-2 flex justify-between">
+                                        <span>解説</span>
+                                        <span className="text-[#4866b5]"># {task.id}</span>
+                                      </div>
+                                      <div className="text-[12px] text-[#e6edf3] leading-relaxed">{task.explanation}</div>
+                                    </div>
+                                  )}
+
                                   <button onClick={(e) => { 
                                      e.stopPropagation();
                                      setCurrentTaskIndex(c => Math.min(c + 1, tasks.length - 1)); 
                                      if(showTasksMobile) setShowTasksMobile(false);
-                                  }} className="w-full bg-[#4a9eff] hover:bg-[#3b82f6] text-white text-[10px] uppercase font-bold tracking-wider py-1.5 rounded transition-colors">
+                                  }} className="w-full bg-[#4866b5] hover:bg-[#3b55a0] active:scale-[0.98] text-white text-[13px] font-semibold py-2.5 rounded-md transition-all flex items-center justify-center gap-2 border border-[#4866b5]">
                                     次のステップへ ➔
                                   </button>
                                </div>
@@ -668,6 +740,35 @@ export default function App() {
                   </div>
                   <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex justify-end gap-3 rounded-b">
                     <button type="button" onClick={() => setSetupStep(null)} className="px-6 py-1.5 text-xs bg-[#4a9eff] hover:bg-[#3b82f6] text-white rounded font-medium transition-colors">Done</button>
+                  </div>
+                </div>
+              )}
+
+              {showResetConfirm && (
+                <div className="w-full max-w-sm bg-[#252526] border border-[#3d3d3d] shadow-2xl flex flex-col items-stretch overflow-hidden">
+                   <div className="bg-[#2d2d2d] px-4 py-2 text-xs font-bold text-[#ccc] border-b border-[#3d3d3d] flex justify-between items-center">
+                    <span>進捗のリセット</span>
+                    <button type="button" onClick={() => setShowResetConfirm(false)} className="text-[#888] hover:text-white text-sm leading-none">✕</button>
+                  </div>
+                  <div className="p-6 flex flex-col gap-4 text-center">
+                     <div className="text-3xl">⚠️</div>
+                     <p className="text-sm text-[#ccc]">トレーニングの進捗をすべてリセットしますか？この操作は取り消せません。</p>
+                  </div>
+                  <div className="p-4 bg-[#2d2d2d] border-t border-[#3d3d3d] flex justify-end gap-3 rounded-b">
+                     <button 
+                        type="button" 
+                        onClick={() => setShowResetConfirm(false)} 
+                        className="px-4 py-2 text-xs text-[#bbb] hover:bg-[#3d3d3d] rounded transition-colors"
+                     >
+                        キャンセル
+                     </button>
+                     <button 
+                        type="button" 
+                        onClick={handleResetTasks} 
+                        className="px-6 py-2 text-xs bg-red-600 hover:bg-red-700 text-white rounded font-medium transition-colors"
+                     >
+                        リセットする
+                     </button>
                   </div>
                 </div>
               )}
