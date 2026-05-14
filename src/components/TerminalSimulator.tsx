@@ -1,7 +1,6 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import { Terminal as XTerm } from 'xterm';
 import { FitAddon } from 'xterm-addon-fit';
-import { io, Socket } from 'socket.io-client';
 import 'xterm/css/xterm.css';
 import { VirtualFileSystem } from '../lib/vfs';
 import { Shell } from '../lib/shell';
@@ -47,7 +46,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
   const terminalRef = useRef<HTMLDivElement>(null);
   const xtermRef = useRef<XTerm | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
-  const socketRef = useRef<Socket | null>(null);
+  // const socketRef = useRef<Socket | null>(null); // serverless mode: socket optional
   const serialPortRef = useRef<any>(null);
   const serialWriterRef = useRef<any>(null);
   const serialReaderRef = useRef<any>(null);
@@ -63,6 +62,9 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
   useEffect(() => {
     pasteParamsRef.current = { pasteDelay, onRequestPasteDelay };
   }, [pasteDelay, onRequestPasteDelay]);
+
+  // Exposed handler ref so both term.onData and writeToServer can reuse the same logic
+  const handleInputRef = useRef<(data: string) => void>(() => {});
 
   useEffect(() => {
     if (!terminalRef.current) return;
@@ -100,9 +102,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
 
     const handleResize = () => {
       fitAddon.fit();
-      if (socketRef.current && config?.type === 'ssh') {
-        socketRef.current.emit('ssh-resize', { cols: term.cols, rows: term.rows });
-      }
+      // ssh remote resize is only relevant when using a real backend socket. In serverless mode this is a no-op.
     };
     window.addEventListener('resize', handleResize);
 
@@ -148,11 +148,22 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
     };
   }, []);
 
+  // writeToServer now routes input to either the serial port or to the local input handler
   const writeToServer = useCallback((data: string) => {
-    if (config?.type === 'ssh' && socketRef.current) {
-      socketRef.current.emit('ssh-data', data);
-    } else if (config?.type === 'serial' && serialWriterRef.current) {
+    if (config?.type === 'serial' && serialWriterRef.current) {
       serialWriterRef.current.write(new TextEncoder().encode(data));
+    } else {
+      // For serverless/mock SSH mode we call the same input handler the terminal uses
+      const handler = handleInputRef.current;
+      if (typeof handler === 'function') {
+        // Feed data character by character to emulate typing
+        for (let i = 0; i < data.length; i++) {
+          handler(data[i]);
+        }
+      } else {
+        // fallback: write directly to terminal output to give feedback
+        xtermRef.current?.write(data);
+      }
     }
   }, [config]);
 
@@ -259,7 +270,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
         }, 1000);
       }, 500);
 
-      onDataDisposable = term.onData(async (data) => {
+      const handleData = async (data: string) => {
         const char = data;
         if (char === '\r') {
            term.writeln('');
@@ -365,7 +376,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
            const pHost = ssh ? ssh.host : config.host;
            term.write(`\x1b[35m${pUser}@${pHost}\x1b[0m:\x1b[34m${shellRef.current.currentDir.replace('/home/user', '~')}\x1b[0m$ ${currentLine}`);
         } else if (char === '\t') { // Tab
-           const commands = ['pwd', 'cd', 'ls', 'cat', 'touch', 'mkdir', 'cp', 'mv', 'rm', 'rmdir', 'chmod', 'chown', 'grep', 'ps', 'top', 'whoami', 'uname', 'hostname', 'id', 'who', 'w', 'df', 'free', 'echo', 'uptime', 'history', 'clear', 'date', 'cal', 'man', 'ssh', 'sudo', 'systemctl', 'ip', 'dig', 'tar', 'sed', 'awk', 'tr', 'find', 'which', 'alias', 'bg', 'fg', 'jobs', 'kill', 'ping', 'curl', 'env', 'passwd', 'read', 'lsattr', 'chattr', 'split', 'dmesg', 'mount', 'strings', 'nmap', 'traceroute', 'tcpdump', 'strace', 'ulimit', 'chsh', 'ntpdate', 'iostat', 'sar', 'fallocate', 'mktemp', 'uuidgen', 'nice', 'renice', 'sysctl', 'objdump', 'rename', 'declare'];
+           const commands = ['pwd', 'cd', 'ls', 'cat', 'touch', 'mkdir', 'cp', 'mv', 'rm', 'rmdir', 'chmod', 'chown', 'grep', 'ps', 'top', 'whoami', 'uname', 'hostname', 'id', 'who', 'w', 'df', 'du', 'echo', 'exit', 'logout'];
            
            const parts = currentLine.split(' ');
            if (parts.length === 1) { // Command completion
@@ -421,7 +432,12 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
            currentLine += char;
            term.write(char);
         }
-      });
+      };
+
+      // bind the handler so other parts of the code (paste) can reuse it
+      handleInputRef.current = handleData;
+
+      onDataDisposable = term.onData(handleData);
     } else if (config.type === 'serial') {
       let isReading = true;
       onDataDisposable = term.onData((data) => {
@@ -432,7 +448,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
           // Requires HTTPS or localhost
           const nav = navigator as any;
           if (!nav.serial) {
-             throw new Error('Web Serial API noot supported in this browser. You may need to open this in a new tab.');
+             throw new Error('Web Serial API not supported in this browser. You may need to open this in a new tab.');
           }
           
           const port = await nav.serial.requestPort();
@@ -483,10 +499,7 @@ export default function TerminalSimulator({ config, onDisconnect, onCommandExecu
       if (onDataDisposable) {
         onDataDisposable.dispose();
       }
-      if (socketRef.current) {
-        socketRef.current.disconnect();
-        socketRef.current = null;
-      }
+      // if (socketRef.current) { socketRef.current.disconnect(); socketRef.current = null; }
     };
   }, [config, writeToServer, fitAddonRef, xtermRef]); // Removed onDisconnect and onDataReceived from dependencies to avoid reconnect loops
 
