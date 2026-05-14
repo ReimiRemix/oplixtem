@@ -170,4 +170,12 @@ async function startServer() {
   });
 }
 
-startServer();
+// Start server only when explicitly enabled (to keep default dev flow serverless/client-only)
+if (process.env.ENABLE_SERVER === 'true' || process.argv.includes('--server')) {
+  startServer().catch(err => {
+    console.error('Failed to start server:', err);
+    process.exit(1);
+  });
+} else {
+  console.log('Server not started. Use `npm run dev:server` or set ENABLE_SERVER=true or pass --server to start the server.');
+}
